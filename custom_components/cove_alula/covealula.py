@@ -503,10 +503,7 @@ class CoveAlulaClient:
             if not dev_id:
                 continue
             if not _as_bool(attrs.get("is_panel", False)):
-                # Some accounts only have the panel; if is_panel is absent, include
-                # anything that isn't explicitly a camera.
-                if _as_bool(attrs.get("is_camera", False)):
-                    continue
+                continue
             ps = self.panels.get(dev_id) or PanelState(device_id=dev_id)
             ps.apply(attrs)
             self.panels[dev_id] = ps
