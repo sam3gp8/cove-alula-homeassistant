@@ -62,7 +62,9 @@ LEVEL_STAY = 2   # home / first armed level
 LEVEL_NIGHT = 3  # corrected from on-device testing (enum nominally called byte 3 "away")
 LEVEL_AWAY = 4   # corrected from on-device testing (enum nominally called byte 4 "night")
 
-CMD_CHANGE_ARMING_LEVEL = "changeArmingLevelUsingCode"
+# CMD_CHANGE_ARMING_LEVEL = "changeArmingLevelUsingCode"
+CMD_CHANGE_ARMING_LEVEL_CODE = "changeArmingLevelUsingCode"
+CMD_CHANGE_ARMING_LEVEL_PARTITION = "partitionArmingLevelChange"
 CMD_REQUEST_MFD = "requestMfd"
 CMD_WRITE_MFD = "writeMfd"
 CHANNEL_HELIX = "device.helix"
@@ -171,6 +173,7 @@ class PanelState:
     device_id: str
     name: Optional[str] = None
     panel_name: Optional[str] = None   # friendly system name, e.g. "My Home"
+    connected_panel: str = ""
     online: Optional[bool] = None
     serial_number: Optional[str] = None
     firmware_version: Optional[str] = None
@@ -198,6 +201,9 @@ class PanelState:
     def apply(self, attrs: dict) -> None:
         """Merge an attributes dict (REST attributes or a socket status payload)."""
         self.raw.update(attrs)
+
+        if "connectedPanel" in attrs:
+            self.connected_panel = attrs["connectedPanel"] or ""
         if "name" in attrs:
             self.name = attrs["name"]
         if "panel_name" in attrs and attrs["panel_name"] not in (None, ""):
@@ -256,6 +262,15 @@ class PanelState:
             return None  # no zone status yet -> unknown
         return len(self.not_ready_zones) == 0
 
+    @property
+    def supports_partition_arming(self) -> bool:
+        """Return True for ConnectFlex-family panels."""
+        return self.connected_panel in (
+            "connectflx",
+            "connectflx_z",
+            "connectflx_dual",
+            "connectflx_dual_z",
+        )
 
 
 
@@ -487,7 +502,6 @@ class CoveAlulaClient:
         return await self._rest("GET", "/rest/v1/self")
 
     async def async_get_devices(self) -> list[dict]:
-        """Return the raw JSON:API 'data' list of all devices on the account."""
         payload = await self._rest("GET", "/rest/v1/devices")
         if isinstance(payload, dict):
             data = payload.get("data", [])
@@ -502,15 +516,19 @@ class CoveAlulaClient:
             dev_id = str(dev.get("id") or attrs.get("device_id") or "")
             if not dev_id:
                 continue
-            if not _as_bool(attrs.get("is_panel", False)):
-                # Some accounts only have the panel; if is_panel is absent, include
-                # anything that isn't explicitly a camera.
-                if _as_bool(attrs.get("is_camera", False)):
-                    continue
+
+            is_panel = _as_bool(
+                attrs.get("is_panel", attrs.get("isPanel", False))
+            )
+
+            if not is_panel:
+                continue
+
             ps = self.panels.get(dev_id) or PanelState(device_id=dev_id)
             ps.apply(attrs)
             self.panels[dev_id] = ps
             out.append(ps)
+
         return out
 
     # ---- alarm ack (RPC) -------------------------------------------------
@@ -595,6 +613,7 @@ class CoveAlulaClient:
                 await asyncio.sleep(60)
 
     def _handle_ws_text(self, text: str) -> None:
+
         text = text.strip()
         if not text:
             return
@@ -1300,14 +1319,55 @@ class CoveAlulaClient:
     ) -> Optional[dict]:
         """Set armingLevelValue using `pin`. 1=disarm, 2=stay, 3=night, 4=away, … (the
         meaning of each armed level is per-panel; confirm with request_arming_level_names)."""
-        payload = {
-            "armingLevelValue": int(level),
-            "armSilent": bool(silent),
-            "noEntryDelay": bool(no_entry_delay),
-            "pin": _pin_to_array(pin),
-        }
+
+        panel = self.panels.get(device_id)
+
+        supports_partition = (
+            panel is not None
+            and panel.supports_partition_arming
+        )
+
+        panel = self.panels.get(device_id)
+
+        if supports_partition:
+            payload = {
+                "armingLevel": {
+                    1: "disarm",
+                    2: "stay",
+                    3: "night",
+                    4: "away",
+                }[level],
+                "partitions": [True, False, False, False, False, False, False, False],
+                "armSilent": bool(silent),
+                "noEntryDelay": bool(no_entry_delay),
+                "authType": "pin" if level == LEVEL_DISARM else "user",
+                "forceArm": False,
+                "userNumber": 0,
+            }
+
+            if level == LEVEL_DISARM:
+                payload["pin"] = _pin_to_array(pin)
+
+            command = CMD_CHANGE_ARMING_LEVEL_PARTITION
+
+        else:
+            payload = {
+                "armingLevelValue": int(level),
+                "armSilent": bool(silent),
+                "noEntryDelay": bool(no_entry_delay),
+                "pin": _pin_to_array(pin),
+            }
+
+            command = CMD_CHANGE_ARMING_LEVEL_CODE
+
+        if level == LEVEL_DISARM:
+            payload["pin"] = _pin_to_array(pin)
+
         return await self._helix_command(
-            device_id, CMD_CHANGE_ARMING_LEVEL, payload, wait=wait
+            device_id,
+            command,
+            payload,
+            wait=wait,
         )
 
     async def async_disarm(self, device_id: str, pin: str, **kw) -> Optional[dict]:
