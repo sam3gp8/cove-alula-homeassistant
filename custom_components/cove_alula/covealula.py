@@ -312,8 +312,8 @@ _LEVEL_STR = {
     "unknown": 0, "level0": 0,
     "disarm": 1, "disarmed": 1, "off": 1, "level1": 1,
     "stay": 2, "arm_stay": 2, "armed_stay": 2, "home": 2, "level2": 2,
-    "away": 3, "arm_away": 3, "armed_away": 3, "level3": 3,
-    "night": 4, "armed_night": 4, "level4": 4,
+    "night": 3, "armed_night": 3, "level3": 3,
+    "away": 4, "arm_away": 4, "armed_away": 4, "level4": 4,
     "level5": 5, "level6": 6, "level7": 7, "level8": 8,
     "any": 255,
 }
@@ -632,6 +632,16 @@ class CoveAlulaClient:
                     continue  # not close enough to expiry yet
                 async with self._auth_lock:
                     await self._refresh_or_login()
+                # Avoid recycling the socket while a command is waiting on a response --
+                # yanking the connection mid-request is what surfaces as "no response
+                # within Ns" on arm/disarm calls (_helix_command's CoveAlulaError). Give
+                # in-flight requests a bounded window to finish first; if they don't
+                # drain in time, proceed anyway so the recycle is never deferred
+                # indefinitely (the token was already refreshed above regardless).
+                for _ in range(6):  # ~3s max, comfortably inside _helix_command's timeout
+                    if not self._pending:
+                        break
+                    await asyncio.sleep(0.5)
                 ws = self._ws
                 if ws is not None and not ws.closed:
                     # closing makes _ws_loop fall through and reopen with the fresh token
@@ -1057,7 +1067,12 @@ class CoveAlulaClient:
         ps = self.panels.get(device_id)
         if ps is None or ps.highest_zone_index is None:
             try:
-                await self.request_highest_indices(device_id, wait=True, timeout=5)
+                # Was hardcoded to 5s, well under this panel/cloud combination's real
+                # round-trip time -- observed live to fail 100% of the time, every single
+                # reconcile cycle, never once succeeding at 5s. _read_mfd's own default
+                # (15.0) is what every other MFD read in this file already relies on;
+                # there was no reason for this one call to override it down.
+                await self.request_highest_indices(device_id, wait=True, timeout=15.0)
             except asyncio.CancelledError:
                 raise
             except Exception as err:  # noqa: BLE001
@@ -1065,8 +1080,21 @@ class CoveAlulaClient:
         await self.request_panel_status(device_id)
         await asyncio.sleep(0.15)
         ps = self.panels.get(device_id)
-        last = int(ps.highest_zone_index) if (ps and ps.highest_zone_index is not None) else 63
-        await self.request_zone_statuses(device_id, 0, last)
+        if ps is None or ps.highest_zone_index is None:
+            # Real zone count still unknown (e.g. this reconcile raced the initial
+            # setup's own highestUsedIndexes read, or the request above also failed/
+            # timed out). Previously this fell back to `last = 63`, scanning the full
+            # protocol-supported zone range and creating a phantom entity for every
+            # response -- observed live as a burst of ~58 bogus "Zone N" entities that
+            # don't correspond to any real panel zone. Skip this reconcile's zone-status
+            # refresh instead of guessing; the explicit setup flow (or a later reconcile,
+            # once the index is known) fills in real zone state shortly after.
+            _LOGGER.debug(
+                "reconcile: highest zone index still unknown for %s; skipping zone-status "
+                "refresh rather than scanning the full 0-63 range", device_id,
+            )
+            return
+        await self.request_zone_statuses(device_id, 0, int(ps.highest_zone_index))
 
     async def async_subscribe_device(self, device_id: str, *, ready_timeout: float = 8.0) -> None:
         """Subscribe to live status + helix channels for a device.
@@ -1174,14 +1202,32 @@ class CoveAlulaClient:
             **kw,
         )
 
-    async def async_load_zones(self, device_id: str, *, last: int = 63) -> None:
+    async def async_load_zones(self, device_id: str, *, last: Optional[int] = None) -> None:
         """Pull zone names, configurations, and live statuses for the panel. Responses
         arrive on the receive loop and populate PanelState.zones. Capped to the panel's
-        highest used zone index when known so we don't create phantom zones."""
+        highest used zone index when known so we don't create phantom zones.
+
+        The `last=63` default this used to carry was itself the bug: if the caller didn't
+        pass an explicit value and `highest_zone_index` wasn't cached yet (e.g. the
+        `request_highest_indices` call in async_refresh_state's budgeted sequence didn't
+        complete in time -- a real, observed failure mode, not hypothetical), this silently
+        fell through to scanning the full protocol-supported 0-63 range, creating a phantom
+        entity for every response. Observed live, twice, from two different callers before
+        this one was found. No caller in this codebase passes `last` explicitly, so the
+        only way to get a real value here is the cache lookup below -- if that's empty,
+        skip instead of guessing.
+        """
         await self.async_subscribe_device(device_id)
         ps = self.panels.get(device_id)
         if ps and ps.highest_zone_index is not None:
             last = max(0, int(ps.highest_zone_index))
+        if last is None:
+            _LOGGER.debug(
+                "async_load_zones: zone count unknown for %s; skipping zone load rather "
+                "than scanning the full 0-63 range -- a later refresh/reconcile will pick "
+                "it up once the index is known", device_id,
+            )
+            return
         await self.request_zone_names(device_id, 0, last)
         await asyncio.sleep(0.2)
         await self.request_zone_configurations(device_id, 0, last)
@@ -1245,9 +1291,23 @@ class CoveAlulaClient:
         are uncertain: it only uses zoneBypass + changeArmingLevelUsingCode, both verified.
         Bypasses clear when the panel is next disarmed.
         """
-        # make sure we have fresh zone status to know what's open
+        # make sure we have fresh zone status to know what's open. Use the real,
+        # already-known zone count rather than unconditionally scanning 0-63 -- that
+        # scan is what created a phantom entity for every response, observed live as a
+        # burst of ~58-64 bogus "Zone N" entities (see async_reconcile's equivalent fix).
+        # highest_zone_index is learned during setup, well before any arm attempt, so the
+        # unknown branch below should be rare in practice.
+        ps = self.panels.get(device_id)
+        zone_last = int(ps.highest_zone_index) if (ps and ps.highest_zone_index is not None) else None
         try:
-            await self.request_zone_statuses(device_id, 0, 63)
+            if zone_last is not None:
+                await self.request_zone_statuses(device_id, 0, zone_last)
+            else:
+                _LOGGER.debug(
+                    "async_arm_bypassing_open: zone count unknown for %s; skipping "
+                    "zone-status refresh rather than scanning the full 0-63 range",
+                    device_id,
+                )
             await asyncio.sleep(1.2)
         except CoveAlulaError:
             pass
@@ -1345,6 +1405,8 @@ class CoveAlulaClient:
         silent: bool = False,
         no_entry_delay: bool = False,
         wait: bool = False,
+        max_retries: int = 2,
+        retry_delay: float = 3.0,
     ) -> Optional[dict]:
         """Set the arming level using `pin`. 1=disarm, 2=stay, 3=night, 4=away, … (the
         meaning of each armed level is per-panel; confirm with request_arming_level_names).
@@ -1354,29 +1416,60 @@ class CoveAlulaClient:
         partitions, armed by user number, PIN only for disarm). We pick the command the
         panel most likely wants, and if the panel rejects it as an *unsupported command* we
         automatically retry with the other family's command and remember which one worked —
-        so this is correct even when we can't identify the panel family up front."""
+        so this is correct even when we can't identify the panel family up front.
+
+        Retries on a plain timeout (CoveAlulaError from _helix_command), up to
+        `max_retries` additional attempts with `retry_delay` between them -- observed live
+        that a single WS round-trip occasionally doesn't get a response within 12s (most
+        likely contention with the coordinator's own periodic reconcile traffic on the same
+        connection), with no retry previously in place, so a single dashboard tap could
+        require the user to press it again by hand. Arming/disarming an already-armed or
+        already-disarmed panel is a safe no-op on this hardware, so retrying the whole
+        command (including re-running the family-detection fallback below) is safe -- this
+        never risks a double physical action, only a repeated one."""
         order = (["partition", "code"]
                  if self._preferred_arming_kind(device_id) == "partition"
                  else ["code", "partition"])
         last: Optional[dict] = None
-        for i, kind in enumerate(order):
-            command, payload = self._build_arming_command(
-                kind, level, pin, silent=silent, no_entry_delay=no_entry_delay
-            )
-            # wait on all but the final attempt so we can detect an unsupported-command NAK
-            # and fall back; honor the caller's `wait` on the last attempt
-            want = True if i < len(order) - 1 else wait
-            resp = await self._helix_command(
-                device_id, command, payload, wait=want, timeout=12.0
-            )
-            last = resp
-            if not _is_unsupported_command_nak(resp):
-                self._arming_command_kind[device_id] = kind  # this family works
-                return resp
-            _LOGGER.info(
-                "panel %s rejected %s as unsupported; retrying with the other arming command",
-                device_id, command,
-            )
+        for attempt in range(max_retries + 1):
+            try:
+                for i, kind in enumerate(order):
+                    command, payload = self._build_arming_command(
+                        kind, level, pin, silent=silent, no_entry_delay=no_entry_delay
+                    )
+                    # wait on all but the final attempt so we can detect an
+                    # unsupported-command NAK and fall back; honor the caller's `wait`
+                    # on the last attempt
+                    want = True if i < len(order) - 1 else wait
+                    # Was 12.0s. Observed live: all 3 attempts (the original call plus
+                    # both retries added above) failed at exactly this mark on a real
+                    # arm attempt -- the same signature as the highestUsedIndexes 5s
+                    # timeout that turned out to just be too tight for this install's
+                    # real round-trip time, not a genuine unsupported-command case
+                    # (those NAK immediately rather than timing out). Bumped to 20.0s;
+                    # the retry loop above remains as a safety net for genuine blips.
+                    resp = await self._helix_command(
+                        device_id, command, payload, wait=want, timeout=20.0
+                    )
+                    last = resp
+                    if not _is_unsupported_command_nak(resp):
+                        self._arming_command_kind[device_id] = kind  # this family works
+                        return resp
+                    _LOGGER.info(
+                        "panel %s rejected %s as unsupported; retrying with the other "
+                        "arming command", device_id, command,
+                    )
+                return last
+            except CoveAlulaError as err:
+                if attempt < max_retries:
+                    _LOGGER.warning(
+                        "arm/disarm command for %s timed out (attempt %d/%d): %s; "
+                        "retrying in %.1fs", device_id, attempt + 1, max_retries + 1,
+                        err, retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                raise
         return last
 
     def _preferred_arming_kind(self, device_id: str) -> str:
