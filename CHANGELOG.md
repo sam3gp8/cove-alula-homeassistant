@@ -14,6 +14,45 @@ _Nothing yet._
 
 ---
 
+## [0.11.1] - 2026-08-08
+
+### Fixed
+- **Arm/disarm did nothing on some ConnectFlex panels** (rejected as "Unsupported command",
+  issue #3). 0.11.0 detected ConnectFlex only from the `connectedPanel` id, which not every
+  ConnectFlex variant reports. Panel-family detection is now robust:
+  - It also recognizes a partition panel by its read capabilities (answers `partitionStatus`
+    but NAKs `panelStatus`), independent of the `connectedPanel` string.
+  - The arming command is now **self-correcting**: if the panel rejects a command as
+    unsupported, the integration automatically retries with the other family's command and
+    remembers which one that panel accepts, so subsequent commands go straight to it.
+
+### Changed
+- Arm/disarm now waits for the panel's acknowledgement (so a failure surfaces to the
+  service call instead of silently doing nothing), which is also what enables the fallback.
+- Diagnostics now include each panel's `connected_panel` family id and
+  `supports_partition_arming`, so panel-family issues are diagnosable from the report.
+
+---
+
+## [0.11.0] - 2026-08-03
+
+### Added
+- **ConnectFlex panel support.** Alula panels come in different families that use different
+  arming commands. The integration now detects the panel family (from the `connectedPanel`
+  attribute) and, for ConnectFlex-family panels, arms via `partitionArmingLevelChange`
+  (string level + partitions, armed by user number, PIN only for disarm) instead of the
+  Helix `changeArmingLevelUsingCode`. Helix panels are unchanged. Thanks to @rsseligman1962
+  and @conorsham for the panel data and initial implementation (PR #4).
+
+### Fixed
+- **Device discovery read the wrong attribute name.** The panel filter checked snake_case
+  `is_panel`, but the cloud sends camelCase `isPanel`; panels were previously included only
+  by the "not a camera" fallback. It now reads `isPanel`/`isCamera` correctly, trusts an
+  explicit panel flag when present, and keeps the lenient fallback for accounts that omit
+  the flag — so both Helix and ConnectFlex panels are found.
+
+---
+
 ## [0.10.1] - 2026-07-28
 
 ### Fixed
@@ -171,7 +210,9 @@ releases and are not itemized here.
 > real hardware before the repository was published, so they share a publication date.
 > Every release from here on gets its own dated entry as it ships.
 
-[Unreleased]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.9.1...v0.9.2

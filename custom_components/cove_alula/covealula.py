@@ -62,9 +62,21 @@ LEVEL_STAY = 2   # home / first armed level
 LEVEL_NIGHT = 3  # corrected from on-device testing (enum nominally called byte 3 "away")
 LEVEL_AWAY = 4   # corrected from on-device testing (enum nominally called byte 4 "night")
 
-# CMD_CHANGE_ARMING_LEVEL = "changeArmingLevelUsingCode"
+# Arming differs by Alula panel family (see PanelState.supports_partition_arming):
+#   Helix        -> changeArmingLevelUsingCode  (numeric armingLevelValue + PIN)
+#   ConnectFlex  -> partitionArmingLevelChange  (string level + partitions + userNumber,
+#                                                PIN only for disarm)
 CMD_CHANGE_ARMING_LEVEL_CODE = "changeArmingLevelUsingCode"
 CMD_CHANGE_ARMING_LEVEL_PARTITION = "partitionArmingLevelChange"
+# ConnectFlex-family panel ids that use the partition arming command.
+_PARTITION_PANEL_FAMILIES = frozenset({
+    "connectflx", "connectflx_z", "connectflx_dual", "connectflx_dual_z",
+})
+# level number -> string name used by the ConnectFlex partition command
+_PARTITION_LEVEL_NAME = {
+    LEVEL_DISARM: "disarm", LEVEL_STAY: "stay",
+    LEVEL_NIGHT: "night", LEVEL_AWAY: "away",
+}
 CMD_REQUEST_MFD = "requestMfd"
 CMD_WRITE_MFD = "writeMfd"
 CHANNEL_HELIX = "device.helix"
@@ -85,6 +97,21 @@ class CoveAlulaAuthError(CoveAlulaError):
 def _pin_to_array(pin: str) -> list[str]:
     """'1234' -> ['1','2','3','4'] as the panel expects."""
     return list(str(pin).strip())
+
+
+def _is_unsupported_command_nak(resp: Optional[dict]) -> bool:
+    """True if a helix command response is a NAK whose reason is that the command is not
+    supported — i.e. we sent the wrong panel family's arming command. Used to fall back
+    to the other command. Any other response (ack, a different NAK, or None) returns False."""
+    if not isinstance(resp, dict):
+        return False
+    event = resp.get("event") if isinstance(resp.get("event"), dict) else None
+    data = event.get("data") if (event and isinstance(event.get("data"), dict)) else resp
+    if not isinstance(data, dict) or data.get("cmdrsp") != "nak":
+        return False
+    reasons = (data.get("payload") or {}).get("nakReasons") or []
+    text = " ".join(str(r.get("reason", "")) for r in reasons).lower()
+    return "unsupported command" in text
 
 
 @dataclass
@@ -173,7 +200,7 @@ class PanelState:
     device_id: str
     name: Optional[str] = None
     panel_name: Optional[str] = None   # friendly system name, e.g. "My Home"
-    connected_panel: str = ""
+    connected_panel: str = ""          # Alula panel family id, e.g. "helix" / "connectflx"
     online: Optional[bool] = None
     serial_number: Optional[str] = None
     firmware_version: Optional[str] = None
@@ -201,7 +228,6 @@ class PanelState:
     def apply(self, attrs: dict) -> None:
         """Merge an attributes dict (REST attributes or a socket status payload)."""
         self.raw.update(attrs)
-
         if "connectedPanel" in attrs:
             self.connected_panel = attrs["connectedPanel"] or ""
         if "name" in attrs:
@@ -264,13 +290,10 @@ class PanelState:
 
     @property
     def supports_partition_arming(self) -> bool:
-        """Return True for ConnectFlex-family panels."""
-        return self.connected_panel in (
-            "connectflx",
-            "connectflx_z",
-            "connectflx_dual",
-            "connectflx_dual_z",
-        )
+        """True for ConnectFlex-family panels, which arm via partitionArmingLevelChange
+        rather than the Helix changeArmingLevelUsingCode command."""
+        return self.connected_panel in _PARTITION_PANEL_FAMILIES
+
 
 
 
@@ -359,6 +382,9 @@ class CoveAlulaClient:
         # diagnostics: map requestId -> MFD read name, and read name -> result string
         self._req_names: dict[str, str] = {}
         self._read_results: dict[str, str] = {}
+        # device_id -> "code" | "partition": the arming command family confirmed to work on
+        # this panel (learned when a command is accepted, so we skip the failing one after).
+        self._arming_command_kind: dict[str, str] = {}
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -502,6 +528,7 @@ class CoveAlulaClient:
         return await self._rest("GET", "/rest/v1/self")
 
     async def async_get_devices(self) -> list[dict]:
+        """Return the raw JSON:API 'data' list of all devices on the account."""
         payload = await self._rest("GET", "/rest/v1/devices")
         if isinstance(payload, dict):
             data = payload.get("data", [])
@@ -516,19 +543,22 @@ class CoveAlulaClient:
             dev_id = str(dev.get("id") or attrs.get("device_id") or "")
             if not dev_id:
                 continue
-
-            is_panel = _as_bool(
-                attrs.get("is_panel", attrs.get("isPanel", False))
-            )
-
-            if not is_panel:
+            # Panel-vs-not filter. The REST API uses camelCase (isPanel / isCamera); the
+            # earlier snake_case-only check never matched, so panels were actually included
+            # by the "not a camera" fallback below. Now: trust an explicit panel flag when
+            # present (this is what includes ConnectFlex panels and excludes flagged
+            # non-panels); if the account sends no panel flag at all, fall back to
+            # "include unless it's a camera" so a panel that omits the flag isn't dropped.
+            raw_is_panel = attrs.get("is_panel", attrs.get("isPanel"))
+            if raw_is_panel is not None:
+                if not _as_bool(raw_is_panel):
+                    continue
+            elif _as_bool(attrs.get("is_camera", attrs.get("isCamera", False))):
                 continue
-
             ps = self.panels.get(dev_id) or PanelState(device_id=dev_id)
             ps.apply(attrs)
             self.panels[dev_id] = ps
             out.append(ps)
-
         return out
 
     # ---- alarm ack (RPC) -------------------------------------------------
@@ -602,6 +632,16 @@ class CoveAlulaClient:
                     continue  # not close enough to expiry yet
                 async with self._auth_lock:
                     await self._refresh_or_login()
+                # Avoid recycling the socket while a command is waiting on a response --
+                # yanking the connection mid-request is what surfaces as "no response
+                # within Ns" on arm/disarm calls (_helix_command's CoveAlulaError). Give
+                # in-flight requests a bounded window to finish first; if they don't
+                # drain in time, proceed anyway so the recycle is never deferred
+                # indefinitely (the token was already refreshed above regardless).
+                for _ in range(6):  # ~3s max, comfortably inside _helix_command's timeout
+                    if not self._pending:
+                        break
+                    await asyncio.sleep(0.5)
                 ws = self._ws
                 if ws is not None and not ws.closed:
                     # closing makes _ws_loop fall through and reopen with the fresh token
@@ -613,7 +653,6 @@ class CoveAlulaClient:
                 await asyncio.sleep(60)
 
     def _handle_ws_text(self, text: str) -> None:
-
         text = text.strip()
         if not text:
             return
@@ -1028,7 +1067,12 @@ class CoveAlulaClient:
         ps = self.panels.get(device_id)
         if ps is None or ps.highest_zone_index is None:
             try:
-                await self.request_highest_indices(device_id, wait=True, timeout=5)
+                # Was hardcoded to 5s, well under this panel/cloud combination's real
+                # round-trip time -- observed live to fail 100% of the time, every single
+                # reconcile cycle, never once succeeding at 5s. _read_mfd's own default
+                # (15.0) is what every other MFD read in this file already relies on;
+                # there was no reason for this one call to override it down.
+                await self.request_highest_indices(device_id, wait=True, timeout=15.0)
             except asyncio.CancelledError:
                 raise
             except Exception as err:  # noqa: BLE001
@@ -1036,8 +1080,21 @@ class CoveAlulaClient:
         await self.request_panel_status(device_id)
         await asyncio.sleep(0.15)
         ps = self.panels.get(device_id)
-        last = int(ps.highest_zone_index) if (ps and ps.highest_zone_index is not None) else 63
-        await self.request_zone_statuses(device_id, 0, last)
+        if ps is None or ps.highest_zone_index is None:
+            # Real zone count still unknown (e.g. this reconcile raced the initial
+            # setup's own highestUsedIndexes read, or the request above also failed/
+            # timed out). Previously this fell back to `last = 63`, scanning the full
+            # protocol-supported zone range and creating a phantom entity for every
+            # response -- observed live as a burst of ~58 bogus "Zone N" entities that
+            # don't correspond to any real panel zone. Skip this reconcile's zone-status
+            # refresh instead of guessing; the explicit setup flow (or a later reconcile,
+            # once the index is known) fills in real zone state shortly after.
+            _LOGGER.debug(
+                "reconcile: highest zone index still unknown for %s; skipping zone-status "
+                "refresh rather than scanning the full 0-63 range", device_id,
+            )
+            return
+        await self.request_zone_statuses(device_id, 0, int(ps.highest_zone_index))
 
     async def async_subscribe_device(self, device_id: str, *, ready_timeout: float = 8.0) -> None:
         """Subscribe to live status + helix channels for a device.
@@ -1145,14 +1202,32 @@ class CoveAlulaClient:
             **kw,
         )
 
-    async def async_load_zones(self, device_id: str, *, last: int = 63) -> None:
+    async def async_load_zones(self, device_id: str, *, last: Optional[int] = None) -> None:
         """Pull zone names, configurations, and live statuses for the panel. Responses
         arrive on the receive loop and populate PanelState.zones. Capped to the panel's
-        highest used zone index when known so we don't create phantom zones."""
+        highest used zone index when known so we don't create phantom zones.
+
+        The `last=63` default this used to carry was itself the bug: if the caller didn't
+        pass an explicit value and `highest_zone_index` wasn't cached yet (e.g. the
+        `request_highest_indices` call in async_refresh_state's budgeted sequence didn't
+        complete in time -- a real, observed failure mode, not hypothetical), this silently
+        fell through to scanning the full protocol-supported 0-63 range, creating a phantom
+        entity for every response. Observed live, twice, from two different callers before
+        this one was found. No caller in this codebase passes `last` explicitly, so the
+        only way to get a real value here is the cache lookup below -- if that's empty,
+        skip instead of guessing.
+        """
         await self.async_subscribe_device(device_id)
         ps = self.panels.get(device_id)
         if ps and ps.highest_zone_index is not None:
             last = max(0, int(ps.highest_zone_index))
+        if last is None:
+            _LOGGER.debug(
+                "async_load_zones: zone count unknown for %s; skipping zone load rather "
+                "than scanning the full 0-63 range -- a later refresh/reconcile will pick "
+                "it up once the index is known", device_id,
+            )
+            return
         await self.request_zone_names(device_id, 0, last)
         await asyncio.sleep(0.2)
         await self.request_zone_configurations(device_id, 0, last)
@@ -1216,9 +1291,23 @@ class CoveAlulaClient:
         are uncertain: it only uses zoneBypass + changeArmingLevelUsingCode, both verified.
         Bypasses clear when the panel is next disarmed.
         """
-        # make sure we have fresh zone status to know what's open
+        # make sure we have fresh zone status to know what's open. Use the real,
+        # already-known zone count rather than unconditionally scanning 0-63 -- that
+        # scan is what created a phantom entity for every response, observed live as a
+        # burst of ~58-64 bogus "Zone N" entities (see async_reconcile's equivalent fix).
+        # highest_zone_index is learned during setup, well before any arm attempt, so the
+        # unknown branch below should be rare in practice.
+        ps = self.panels.get(device_id)
+        zone_last = int(ps.highest_zone_index) if (ps and ps.highest_zone_index is not None) else None
         try:
-            await self.request_zone_statuses(device_id, 0, 63)
+            if zone_last is not None:
+                await self.request_zone_statuses(device_id, 0, zone_last)
+            else:
+                _LOGGER.debug(
+                    "async_arm_bypassing_open: zone count unknown for %s; skipping "
+                    "zone-status refresh rather than scanning the full 0-63 range",
+                    device_id,
+                )
             await asyncio.sleep(1.2)
         except CoveAlulaError:
             pass
@@ -1316,59 +1405,119 @@ class CoveAlulaClient:
         silent: bool = False,
         no_entry_delay: bool = False,
         wait: bool = False,
+        max_retries: int = 2,
+        retry_delay: float = 3.0,
     ) -> Optional[dict]:
-        """Set armingLevelValue using `pin`. 1=disarm, 2=stay, 3=night, 4=away, … (the
-        meaning of each armed level is per-panel; confirm with request_arming_level_names)."""
+        """Set the arming level using `pin`. 1=disarm, 2=stay, 3=night, 4=away, … (the
+        meaning of each armed level is per-panel; confirm with request_arming_level_names).
 
+        The command differs by Alula panel family: Helix uses changeArmingLevelUsingCode
+        (numeric level + PIN); ConnectFlex uses partitionArmingLevelChange (string level +
+        partitions, armed by user number, PIN only for disarm). We pick the command the
+        panel most likely wants, and if the panel rejects it as an *unsupported command* we
+        automatically retry with the other family's command and remember which one worked —
+        so this is correct even when we can't identify the panel family up front.
+
+        Retries on a plain timeout (CoveAlulaError from _helix_command), up to
+        `max_retries` additional attempts with `retry_delay` between them -- observed live
+        that a single WS round-trip occasionally doesn't get a response within 12s (most
+        likely contention with the coordinator's own periodic reconcile traffic on the same
+        connection), with no retry previously in place, so a single dashboard tap could
+        require the user to press it again by hand. Arming/disarming an already-armed or
+        already-disarmed panel is a safe no-op on this hardware, so retrying the whole
+        command (including re-running the family-detection fallback below) is safe -- this
+        never risks a double physical action, only a repeated one."""
+        order = (["partition", "code"]
+                 if self._preferred_arming_kind(device_id) == "partition"
+                 else ["code", "partition"])
+        last: Optional[dict] = None
+        for attempt in range(max_retries + 1):
+            try:
+                for i, kind in enumerate(order):
+                    command, payload = self._build_arming_command(
+                        kind, level, pin, silent=silent, no_entry_delay=no_entry_delay
+                    )
+                    # wait on all but the final attempt so we can detect an
+                    # unsupported-command NAK and fall back; honor the caller's `wait`
+                    # on the last attempt
+                    want = True if i < len(order) - 1 else wait
+                    # Was 12.0s. Observed live: all 3 attempts (the original call plus
+                    # both retries added above) failed at exactly this mark on a real
+                    # arm attempt -- the same signature as the highestUsedIndexes 5s
+                    # timeout that turned out to just be too tight for this install's
+                    # real round-trip time, not a genuine unsupported-command case
+                    # (those NAK immediately rather than timing out). Bumped to 20.0s;
+                    # the retry loop above remains as a safety net for genuine blips.
+                    resp = await self._helix_command(
+                        device_id, command, payload, wait=want, timeout=20.0
+                    )
+                    last = resp
+                    if not _is_unsupported_command_nak(resp):
+                        self._arming_command_kind[device_id] = kind  # this family works
+                        return resp
+                    _LOGGER.info(
+                        "panel %s rejected %s as unsupported; retrying with the other "
+                        "arming command", device_id, command,
+                    )
+                return last
+            except CoveAlulaError as err:
+                if attempt < max_retries:
+                    _LOGGER.warning(
+                        "arm/disarm command for %s timed out (attempt %d/%d): %s; "
+                        "retrying in %.1fs", device_id, attempt + 1, max_retries + 1,
+                        err, retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                raise
+        return last
+
+    def _preferred_arming_kind(self, device_id: str) -> str:
+        """Which arming command to try first: 'partition' for ConnectFlex-family panels,
+        else 'code' (Helix). Uses, in order: a previously-learned result, an explicit
+        connectedPanel family id, or the panel's read capabilities (a partition panel
+        answers partitionStatus but NAKs panelStatus)."""
+        cached = self._arming_command_kind.get(device_id)
+        if cached:
+            return cached
         panel = self.panels.get(device_id)
+        if panel is not None and panel.supports_partition_arming:
+            return "partition"
+        rr = self._read_results
+        if rr.get("partitionStatus") == "ok" and str(rr.get("panelStatus", "")).startswith("NAK"):
+            return "partition"
+        return "code"
 
-        supports_partition = (
-            panel is not None
-            and panel.supports_partition_arming
-        )
-
-        panel = self.panels.get(device_id)
-
-        if supports_partition:
+    def _build_arming_command(
+        self, kind: str, level: int, pin: str, *, silent: bool, no_entry_delay: bool
+    ) -> tuple[str, dict]:
+        """Build the (command, payload) pair for one arming-command family."""
+        if kind == "partition":
+            name = _PARTITION_LEVEL_NAME.get(int(level))
+            if name is None:
+                raise CoveAlulaError(
+                    f"partition arming does not support arming level {level}"
+                )
             payload = {
-                "armingLevel": {
-                    1: "disarm",
-                    2: "stay",
-                    3: "night",
-                    4: "away",
-                }[level],
+                "armingLevel": name,
                 "partitions": [True, False, False, False, False, False, False, False],
                 "armSilent": bool(silent),
                 "noEntryDelay": bool(no_entry_delay),
+                # ConnectFlex arms by user number; disarm authenticates with the PIN
                 "authType": "pin" if level == LEVEL_DISARM else "user",
-                "forceArm": False,
                 "userNumber": 0,
+                "forceArm": False,
             }
-
             if level == LEVEL_DISARM:
                 payload["pin"] = _pin_to_array(pin)
-
-            command = CMD_CHANGE_ARMING_LEVEL_PARTITION
-
-        else:
-            payload = {
-                "armingLevelValue": int(level),
-                "armSilent": bool(silent),
-                "noEntryDelay": bool(no_entry_delay),
-                "pin": _pin_to_array(pin),
-            }
-
-            command = CMD_CHANGE_ARMING_LEVEL_CODE
-
-        if level == LEVEL_DISARM:
-            payload["pin"] = _pin_to_array(pin)
-
-        return await self._helix_command(
-            device_id,
-            command,
-            payload,
-            wait=wait,
-        )
+            return CMD_CHANGE_ARMING_LEVEL_PARTITION, payload
+        payload = {
+            "armingLevelValue": int(level),
+            "armSilent": bool(silent),
+            "noEntryDelay": bool(no_entry_delay),
+            "pin": _pin_to_array(pin),
+        }
+        return CMD_CHANGE_ARMING_LEVEL_CODE, payload
 
     async def async_disarm(self, device_id: str, pin: str, **kw) -> Optional[dict]:
         return await self.async_set_arming_level(device_id, LEVEL_DISARM, pin, **kw)

@@ -74,6 +74,8 @@ def _panel_dict(ps: PanelState) -> dict[str, Any]:
     return {
         "device_id": REDACTED,
         "name": REDACTED,  # user-chosen friendly name may contain personal info
+        "connected_panel": ps.connected_panel,  # Alula panel family id (not sensitive)
+        "supports_partition_arming": ps.supports_partition_arming,
         "online": ps.online,
         "firmware_version": ps.firmware_version,
         "arming_level": ps.arming_level,

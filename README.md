@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![Validate](https://github.com/sam3gp8/cove-alula-homeassistant/actions/workflows/validate.yml/badge.svg)](https://github.com/sam3gp8/cove-alula-homeassistant/actions/workflows/validate.yml)
-![version](https://img.shields.io/badge/version-0.10.1-blue.svg)
+![version](https://img.shields.io/badge/version-0.11.1-blue.svg)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/sam3gp8)
 
 📋 **[Changelog](CHANGELOG.md)** — what changed in each release.
@@ -62,21 +62,21 @@ exact name:
 # from the extracted folder (contains custom_components/, hacs.json, README.md, .github/)
 git init -b main
 git add .
-git commit -m "Cove (Alula) Alarm v0.10.1"
+git commit -m "Cove (Alula) Alarm v0.11.1"
 git remote add origin https://github.com/sam3gp8/cove-alula-homeassistant.git
 git push -u origin main
 
 # cut a release so HACS has a versioned download (tag must match manifest "version")
-git tag v0.10.1
-git push origin v0.10.1
+git tag v0.11.1
+git push origin v0.11.1
 ```
 
-Then on GitHub: **Releases → Draft a new release → choose tag `v0.10.1` → Publish**, and
+Then on GitHub: **Releases → Draft a new release → choose tag `v0.11.1` → Publish**, and
 paste that version's section from [CHANGELOG.md](CHANGELOG.md) into the release notes —
 HACS shows those notes to users before they update.
 
 HACS installs the latest release, so three things must stay in sync on every release: the
-git tag (`v0.10.1`), the manifest `version` (`0.10.1`), and the `CHANGELOG.md` heading.
+git tag (`v0.11.1`), the manifest `version` (`0.11.1`), and the `CHANGELOG.md` heading.
 
 The included CI workflow (`.github/workflows/validate.yml`) runs **HACS validation** and
 Home Assistant **hassfest** on every push, so you'll see a green check once it's pushed.
