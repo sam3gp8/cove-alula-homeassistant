@@ -312,8 +312,8 @@ _LEVEL_STR = {
     "unknown": 0, "level0": 0,
     "disarm": 1, "disarmed": 1, "off": 1, "level1": 1,
     "stay": 2, "arm_stay": 2, "armed_stay": 2, "home": 2, "level2": 2,
-    "night": 3, "armed_night": 3, "level3": 3,
-    "away": 4, "arm_away": 4, "armed_away": 4, "level4": 4,
+    "away": 3, "arm_away": 3, "armed_away": 3, "level3": 3,
+    "night": 4, "armed_night": 4, "level4": 4,
     "level5": 5, "level6": 6, "level7": 7, "level8": 8,
     "any": 255,
 }
