@@ -10,5 +10,5 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/sam3gp8/cove-alula-homeassistant/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }

@@ -17,6 +17,7 @@ from .const import (
     AVAILABILITY_GRACE_SECONDS,
     CONF_EMAIL,
     CONF_PASSWORD,
+    CONF_PIN,
     CONF_TOKEN,
     DOMAIN,
     POLL_INTERVAL_SECONDS,
@@ -45,6 +46,13 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
         self.entry = entry
         session = async_get_clientsession(hass)
 
+        # Snapshot of the config fields that actually warrant a reload. The token is
+        # refreshed and persisted to the entry every ~14 minutes; persisting fires the
+        # entry's update listener, and reloading on every token write tore down and
+        # rebuilt every entity -- the real cause of the recurring 2-3s "unavailable"
+        # blips in the history. config_changed() lets the listener skip token-only writes.
+        self._reload_signature = self._config_signature(entry)
+
         # device_id -> monotonic time of last HEALTHY contact (a live push or a genuinely
         # successful poll where the panel reported itself online). Entity availability is
         # derived from this with a grace period, so brief socket recycles don't flap.
@@ -64,9 +72,31 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
         )
 
     async def _persist_token(self, token: CoveToken) -> None:
-        """Save the refreshed token into the config entry."""
+        """Save the refreshed token into the config entry so restarts don't re-login.
+        This fires the entry update listener; config_changed() below makes that listener
+        skip the reload for these token-only writes."""
         data = {**self.entry.data, CONF_TOKEN: token.as_dict()}
         self.hass.config_entries.async_update_entry(self.entry, data=data)
+
+    @staticmethod
+    def _config_signature(entry: ConfigEntry) -> tuple:
+        """The parts of the entry whose change should trigger a reload -- credentials and
+        PIN. Deliberately excludes CONF_TOKEN, which changes on every refresh."""
+        return (
+            entry.data.get(CONF_EMAIL),
+            entry.data.get(CONF_PASSWORD),
+            entry.data.get(CONF_PIN),
+        )
+
+    def config_changed(self, entry: ConfigEntry) -> bool:
+        """True only if a reload-worthy field (email/password/PIN) changed since the last
+        reload. Returns False for token-only writes, so the update listener can skip the
+        reload that would otherwise flap every entity to 'unavailable'."""
+        sig = self._config_signature(entry)
+        if sig == self._reload_signature:
+            return False
+        self._reload_signature = sig
+        return True
 
     def _on_push(self, panel: PanelState) -> None:
         """Websocket pushed new state -> notify entities immediately."""

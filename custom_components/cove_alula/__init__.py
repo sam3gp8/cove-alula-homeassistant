@@ -138,4 +138,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload only when a reload-worthy field changed (credentials / PIN).
+
+    The access token is refreshed and written back to the entry about every 14 minutes.
+    That write fires this update listener, and reloading the whole integration each time
+    tore down and rebuilt every entity -- surfacing as recurring 2-3s "unavailable" blips
+    in the history. Skip the reload for those token-only writes.
+    """
+    coordinator: CoveAlulaCoordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is not None and not coordinator.config_changed(entry):
+        return
     await hass.config_entries.async_reload(entry.entry_id)

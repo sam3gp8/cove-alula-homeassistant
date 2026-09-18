@@ -14,6 +14,24 @@ _Nothing yet._
 
 ---
 
+## [1.0.1] - 2026-09-18
+
+### Fixed
+- **Entities still flapped to "unavailable" every ~14 minutes** (the 1.0.0 grace period did
+  not resolve it, because the entities were being destroyed, not merely marked unavailable).
+  Root cause: the access token is refreshed and written back to the config entry roughly
+  every 14 minutes, and the entry's update listener reloaded the **entire integration** on
+  every write — tearing down and rebuilding all entities, which surfaced as a recurring
+  2–3 second `unavailable → closed` pair in the history and Activity feed. The update
+  listener now reloads only when a reload-worthy field (email, password, or PIN) actually
+  changes, and skips these token-only writes. The token is still persisted, so restarts
+  don't re-login.
+
+The 1.0.0 availability grace period is retained — it still smooths over genuine brief
+websocket drops that don't involve a reload.
+
+---
+
 ## [1.0.0] - 2026-09-18
 
 First stable release. The integration has run reliably against live Helix and ConnectFlex
@@ -259,7 +277,8 @@ releases and are not itemized here.
 > real hardware before the repository was published, so they share a publication date.
 > Every release from here on gets its own dated entry as it ships.
 
-[Unreleased]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.2...v1.0.0
 [0.11.2]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.0...v0.11.1
