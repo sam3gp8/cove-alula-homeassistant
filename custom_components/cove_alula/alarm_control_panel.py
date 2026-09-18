@@ -21,7 +21,6 @@ from .covealula import (
     LEVEL_DISARM,
     LEVEL_NIGHT,
     LEVEL_STAY,
-    LEVEL_UNKNOWN,
     PanelState,
 )
 from .coordinator import CoveAlulaCoordinator
@@ -67,9 +66,6 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
         self._device_id = device_id
         self._pin = entry.data[CONF_PIN]
         self._attr_unique_id = f"{entry.entry_id}_{device_id}"
-        # Held across brief transitional reads (see alarm_state) so the entity never
-        # blanks to "unknown" mid-command, which hides the Lovelace card's action buttons.
-        self._last_known_state: AlarmControlPanelState | None = None
 
     @property
     def _panel(self) -> PanelState | None:
@@ -77,8 +73,14 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
 
     @property
     def available(self) -> bool:
-        p = self._panel
-        return super().available and p is not None and (p.online is not False)
+        # Ride over brief connection lapses. Once we've seen this panel, stay available as
+        # long as the coordinator has had healthy contact within the grace window, even if
+        # the current poll/socket momentarily dropped. This prevents the 2-second
+        # "unavailable" blips (and the resulting history/activity noise) on every socket
+        # recycle. A sustained outage ages out of the grace window and correctly reports
+        # unavailable. Panel-reported-offline is folded into the grace via _mark_healthy,
+        # which only stamps contact while the panel is online.
+        return self._panel is not None and self.coordinator.panel_is_fresh(self._device_id)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -101,35 +103,17 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
         if p is None:
             return None
         if p.alarm:
-            self._last_known_state = AlarmControlPanelState.TRIGGERED
-            return self._last_known_state
+            return AlarmControlPanelState.TRIGGERED
         if p.in_entry_delay:
-            self._last_known_state = AlarmControlPanelState.PENDING
-            return self._last_known_state
+            return AlarmControlPanelState.PENDING
         if p.in_exit_delay:
-            self._last_known_state = AlarmControlPanelState.ARMING
-            return self._last_known_state
-        mapped = {
+            return AlarmControlPanelState.ARMING
+        return {
             LEVEL_DISARM: AlarmControlPanelState.DISARMED,
             LEVEL_STAY: AlarmControlPanelState.ARMED_HOME,
             LEVEL_AWAY: AlarmControlPanelState.ARMED_AWAY,
             LEVEL_NIGHT: AlarmControlPanelState.ARMED_NIGHT,
-        }.get(p.arming_level)
-        if mapped is not None:
-            self._last_known_state = mapped
-            return mapped
-        # arming_level is LEVEL_UNKNOWN (0) or some other unmapped value: the panel
-        # reports this as a real transitional reading (e.g. right after exit delay
-        # ends, before the settled arm/disarm level lands), not a "no data" case.
-        # Keep showing the last real state instead of blanking to `unknown`, which
-        # would otherwise hide the Lovelace alarm card's action buttons -- including
-        # Disarm -- for as long as the transitional value persists.
-        if p.arming_level == LEVEL_UNKNOWN:
-            _LOGGER.debug(
-                "device %s: arming_level is LEVEL_UNKNOWN, holding last known state %s",
-                self._device_id, self._last_known_state,
-            )
-        return self._last_known_state
+        }.get(p.arming_level, None)
 
     @property
     def extra_state_attributes(self) -> dict:

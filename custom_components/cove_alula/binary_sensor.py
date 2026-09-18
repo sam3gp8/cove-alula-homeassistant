@@ -164,8 +164,14 @@ class _BasePanelEntity(CoordinatorEntity[CoveAlulaCoordinator], BinarySensorEnti
 
     @property
     def available(self) -> bool:
-        p = self._panel
-        return super().available and p is not None and (p.online is not False)
+        # Ride over brief connection lapses. Once we've seen this panel, stay available as
+        # long as the coordinator has had healthy contact within the grace window, even if
+        # the current poll/socket momentarily dropped. This prevents the 2-second
+        # "unavailable" blips (and the resulting history/activity noise) on every socket
+        # recycle. A sustained outage ages out of the grace window and correctly reports
+        # unavailable. Panel-reported-offline is folded into the grace via _mark_healthy,
+        # which only stamps contact while the panel is online.
+        return self._panel is not None and self.coordinator.panel_is_fresh(self._device_id)
 
 
 class CoveAlulaZoneSensor(_BasePanelEntity):

@@ -14,6 +14,31 @@ _Nothing yet._
 
 ---
 
+## [1.0.0] - 2026-09-18
+
+First stable release. The integration has run reliably against live Helix and ConnectFlex
+panels through the 0.7–0.11 series (reverse-engineered client, HACS packaging, real-time
+websocket state, arm/disarm for both panel families, auto-reauth, diagnostics), and this
+release resolves the last remaining source of everyday noise.
+
+### Fixed
+- **Entities no longer flap to "unavailable" on brief connection lapses.** Cove/Alula has
+  no always-on connection, and the integration intentionally recycles the websocket around
+  token refreshes, so short gaps are normal. Previously each one flipped every entity to
+  *unavailable* for a second or two, spamming the Home Assistant history and Activity feed
+  with `unavailable → closed` pairs every few minutes. Availability now has a grace period
+  (`AVAILABILITY_GRACE_SECONDS`, 45s): the last known state is kept through a lapse, and an
+  entity is only reported unavailable after contact has genuinely been lost for longer than
+  the grace window. A real, sustained outage (or a panel that reports itself offline) still
+  surfaces as unavailable, within ~45–60s.
+
+### Changed
+- Availability is now derived from the time since the coordinator last had healthy contact
+  (a live push or a successful poll while the panel was online) rather than from the
+  momentary poll/socket state, so transient failures don't reach the UI.
+
+---
+
 ## [0.11.2] - 2026-08-28
 
 Merge resolution of the ConnectFlex work (PR #4) with the capability-based approach on
@@ -234,7 +259,8 @@ releases and are not itemized here.
 > real hardware before the repository was published, so they share a publication date.
 > Every release from here on gets its own dated entry as it ships.
 
-[Unreleased]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.2...v1.0.0
 [0.11.2]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.10.1...v0.11.0

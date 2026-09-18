@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,6 +14,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    AVAILABILITY_GRACE_SECONDS,
     CONF_EMAIL,
     CONF_PASSWORD,
     CONF_TOKEN,
@@ -43,6 +45,11 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
         self.entry = entry
         session = async_get_clientsession(hass)
 
+        # device_id -> monotonic time of last HEALTHY contact (a live push or a genuinely
+        # successful poll where the panel reported itself online). Entity availability is
+        # derived from this with a grace period, so brief socket recycles don't flap.
+        self._last_healthy: dict[str, float] = {}
+
         token = None
         if entry.data.get(CONF_TOKEN):
             token = CoveToken.from_dict(entry.data[CONF_TOKEN])
@@ -63,7 +70,27 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
 
     def _on_push(self, panel: PanelState) -> None:
         """Websocket pushed new state -> notify entities immediately."""
+        self._mark_healthy(self.client.panels)
         self.async_set_updated_data(dict(self.client.panels))
+
+    def _mark_healthy(self, panels: dict[str, PanelState]) -> None:
+        """Record 'now' as the last healthy contact for each panel that isn't reporting
+        itself offline. Called only on genuine contact (a live push or a successful poll) --
+        never on the keep-last-known-state fallbacks below, so a real outage still ages out."""
+        now = time.monotonic()
+        for device_id, panel in panels.items():
+            if panel.online is not False:
+                self._last_healthy[device_id] = now
+
+    def panel_is_fresh(self, device_id: str) -> bool:
+        """Whether we've had healthy contact for this panel within the grace window. Entity
+        `available` uses this instead of the momentary poll/socket state, so a brief lapse
+        (Cove/Alula offers no persistent connection; we also recycle the socket on token
+        refresh) keeps the last known state instead of flapping to 'unavailable'."""
+        ts = self._last_healthy.get(device_id, 0.0)
+        if not ts:
+            return False  # never had a healthy view yet -> unavailable until first data
+        return (time.monotonic() - ts) < AVAILABILITY_GRACE_SECONDS
 
     async def async_setup(self) -> None:
         """Authenticate, discover panels, open the socket, and subscribe.
@@ -108,6 +135,7 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
                 _LOGGER.debug("initial snapshot for %s incomplete: %s", device_id, err)
         await asyncio.sleep(1)  # let the last responses land
         if self.client.panels:
+            self._mark_healthy(self.client.panels)
             self.async_set_updated_data(dict(self.client.panels))
 
     async def _async_update_data(self) -> dict[str, PanelState]:
@@ -147,6 +175,8 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
                 _LOGGER.debug("poll reconcile failed, keeping last known state: %s", err)
                 return dict(self.client.panels)
             raise UpdateFailed(f"poll failed: {err}") from err
+        # reached only when the reconcile above completed without error == genuine contact
+        self._mark_healthy(self.client.panels)
         return dict(self.client.panels)
 
     async def async_shutdown(self) -> None:
