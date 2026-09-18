@@ -21,6 +21,7 @@ from .covealula import (
     LEVEL_DISARM,
     LEVEL_NIGHT,
     LEVEL_STAY,
+    LEVEL_UNKNOWN,
     PanelState,
 )
 from .coordinator import CoveAlulaCoordinator
@@ -66,6 +67,9 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
         self._device_id = device_id
         self._pin = entry.data[CONF_PIN]
         self._attr_unique_id = f"{entry.entry_id}_{device_id}"
+        # Held across brief transitional reads (see alarm_state) so the entity never
+        # blanks to "unknown" mid-command, which hides the Lovelace card's action buttons.
+        self._last_known_state: AlarmControlPanelState | None = None
 
     @property
     def _panel(self) -> PanelState | None:
@@ -97,17 +101,35 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
         if p is None:
             return None
         if p.alarm:
-            return AlarmControlPanelState.TRIGGERED
+            self._last_known_state = AlarmControlPanelState.TRIGGERED
+            return self._last_known_state
         if p.in_entry_delay:
-            return AlarmControlPanelState.PENDING
+            self._last_known_state = AlarmControlPanelState.PENDING
+            return self._last_known_state
         if p.in_exit_delay:
-            return AlarmControlPanelState.ARMING
-        return {
+            self._last_known_state = AlarmControlPanelState.ARMING
+            return self._last_known_state
+        mapped = {
             LEVEL_DISARM: AlarmControlPanelState.DISARMED,
             LEVEL_STAY: AlarmControlPanelState.ARMED_HOME,
             LEVEL_AWAY: AlarmControlPanelState.ARMED_AWAY,
             LEVEL_NIGHT: AlarmControlPanelState.ARMED_NIGHT,
-        }.get(p.arming_level, None)
+        }.get(p.arming_level)
+        if mapped is not None:
+            self._last_known_state = mapped
+            return mapped
+        # arming_level is LEVEL_UNKNOWN (0) or some other unmapped value: the panel
+        # reports this as a real transitional reading (e.g. right after exit delay
+        # ends, before the settled arm/disarm level lands), not a "no data" case.
+        # Keep showing the last real state instead of blanking to `unknown`, which
+        # would otherwise hide the Lovelace alarm card's action buttons -- including
+        # Disarm -- for as long as the transitional value persists.
+        if p.arming_level == LEVEL_UNKNOWN:
+            _LOGGER.debug(
+                "device %s: arming_level is LEVEL_UNKNOWN, holding last known state %s",
+                self._device_id, self._last_known_state,
+            )
+        return self._last_known_state
 
     @property
     def extra_state_attributes(self) -> dict:
