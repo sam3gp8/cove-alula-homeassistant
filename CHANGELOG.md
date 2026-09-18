@@ -14,6 +14,30 @@ _Nothing yet._
 
 ---
 
+## [0.11.2] - 2026-08-28
+
+Merge resolution of the ConnectFlex work (PR #4) with the capability-based approach on
+`main`, keeping `main`'s panel detection and self-correcting arming, plus several
+robustness fixes observed against live panels.
+
+### Fixed
+- **Arm/disarm could time out on a single WebSocket round-trip.** Arm/disarm now retries a
+  timed-out command (up to two more attempts) and the per-command timeout was raised from
+  12s to 20s. Arming an already-armed (or disarming an already-disarmed) panel is a safe
+  no-op on this hardware, so a retry never causes a double action.
+- **Phantom "Zone N" entities.** When the panel's real zone count wasn't known yet, three
+  paths (`reconcile`, zone loading, and arm-bypassing-open) fell back to scanning the full
+  0–63 range, creating a bogus entity per response. They now skip the zone read until the
+  real highest-zone index is known instead of guessing.
+- **Reconcile's `highestUsedIndexes` read timed out too quickly** (5s, observed to fail
+  every cycle on some setups); raised to 15s to match the other reads.
+
+### Changed
+- Before the token watchdog recycles the socket, it now waits briefly for any in-flight
+  request to finish, so a proactive reconnect can't cancel an arm/disarm mid-flight.
+
+---
+
 ## [0.11.1] - 2026-08-08
 
 ### Fixed
@@ -210,7 +234,8 @@ releases and are not itemized here.
 > real hardware before the repository was published, so they share a publication date.
 > Every release from here on gets its own dated entry as it ships.
 
-[Unreleased]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/sam3gp8/cove-alula-homeassistant/compare/v0.10.0...v0.10.1
