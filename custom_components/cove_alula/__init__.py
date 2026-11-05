@@ -12,17 +12,21 @@ from .const import (
     ATTR_BYPASS,
     ATTR_METHOD,
     ATTR_MODE,
+    ATTR_NO_ENTRY_DELAY,
+    ATTR_SILENT,
     ATTR_ZONE,
     CONF_PIN,
     DOMAIN,
     PLATFORMS,
+    SERVICE_ARM,
     SERVICE_BYPASS_ZONE,
     SERVICE_CANCEL_ALARM,
     SERVICE_CONFIRM_ALARM,
+    SERVICE_DISARM,
     SERVICE_FORCE_ARM,
 )
 from .coordinator import CoveAlulaCoordinator
-from .covealula import LEVEL_AWAY, LEVEL_NIGHT, LEVEL_STAY
+from .covealula import LEVEL_AWAY, LEVEL_DISARM, LEVEL_NIGHT, LEVEL_STAY
 
 # arm mode -> armingLevelValue. Sourced from the client constants so the away/night
 # assignment can never drift out of sync with the arm/read mapping there.
@@ -82,6 +86,36 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         for coord in _coordinators(hass):
             await coord.async_request_refresh()
 
+    async def _arm(call: ServiceCall) -> None:
+        mode = str(call.data[ATTR_MODE]).lower()
+        level = _MODE_LEVEL.get(mode)
+        if level is None:
+            return
+        silent = bool(call.data.get(ATTR_SILENT, False))
+        no_entry_delay = bool(call.data.get(ATTR_NO_ENTRY_DELAY, False))
+
+        async def h(coord, device_id):
+            pin = coord.entry.data.get(CONF_PIN)
+            await coord.client.async_set_arming_level(
+                device_id, level, pin, silent=silent, no_entry_delay=no_entry_delay
+            )
+        await _for_each_panel(h)
+        for coord in _coordinators(hass):
+            await coord.async_request_refresh()
+
+    async def _disarm(call: ServiceCall) -> None:
+        silent = bool(call.data.get(ATTR_SILENT, False))
+        no_entry_delay = bool(call.data.get(ATTR_NO_ENTRY_DELAY, False))
+
+        async def h(coord, device_id):
+            pin = coord.entry.data.get(CONF_PIN)
+            await coord.client.async_set_arming_level(
+                device_id, LEVEL_DISARM, pin, silent=silent, no_entry_delay=no_entry_delay
+            )
+        await _for_each_panel(h)
+        for coord in _coordinators(hass):
+            await coord.async_request_refresh()
+
     hass.services.async_register(DOMAIN, SERVICE_CANCEL_ALARM, _cancel)
     hass.services.async_register(DOMAIN, SERVICE_CONFIRM_ALARM, _confirm)
     hass.services.async_register(
@@ -103,6 +137,29 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             {
                 vol.Required(ATTR_MODE): vol.In(["home", "stay", "away", "night"]),
                 vol.Optional(ATTR_METHOD, default="bypass"): vol.In(["bypass", "native"]),
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ARM,
+        _arm,
+        schema=vol.Schema(
+            {
+                vol.Required(ATTR_MODE): vol.In(["home", "stay", "away", "night"]),
+                vol.Optional(ATTR_SILENT, default=False): cv.boolean,
+                vol.Optional(ATTR_NO_ENTRY_DELAY, default=False): cv.boolean,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DISARM,
+        _disarm,
+        schema=vol.Schema(
+            {
+                vol.Optional(ATTR_SILENT, default=False): cv.boolean,
+                vol.Optional(ATTR_NO_ENTRY_DELAY, default=False): cv.boolean,
             }
         ),
     )
@@ -131,7 +188,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # remove services when the last entry goes away
         if not hass.data.get(DOMAIN):
             for svc in (SERVICE_CANCEL_ALARM, SERVICE_CONFIRM_ALARM, SERVICE_BYPASS_ZONE,
-                        SERVICE_FORCE_ARM):
+                        SERVICE_FORCE_ARM, SERVICE_ARM, SERVICE_DISARM):
                 if hass.services.has_service(DOMAIN, svc):
                     hass.services.async_remove(DOMAIN, svc)
     return unload_ok

@@ -60,3 +60,55 @@ force_arm:
           options:
             - bypass
             - native
+
+arm:
+  name: Arm
+  description: >
+    Arm the panel using your stored PIN, optionally silently (no exit beeps) and/or with
+    no entry delay. Same options as the Cove app's silent toggle.
+  fields:
+    mode:
+      name: Mode
+      description: Which armed mode to set.
+      required: true
+      example: away
+      selector:
+        select:
+          options:
+            - home
+            - away
+            - night
+    silent:
+      name: Silent
+      description: Arm without sounding the exit-delay beeps.
+      required: false
+      default: false
+      selector:
+        boolean:
+    no_entry_delay:
+      name: No entry delay
+      description: Skip the entry delay while armed.
+      required: false
+      default: false
+      selector:
+        boolean:
+
+disarm:
+  name: Disarm
+  description: >
+    Disarm the panel using your stored PIN, optionally silently.
+  fields:
+    silent:
+      name: Silent
+      description: Disarm without sounding the panel.
+      required: false
+      default: false
+      selector:
+        boolean:
+    no_entry_delay:
+      name: No entry delay
+      description: Send the no-entry-delay flag with the disarm command.
+      required: false
+      default: false
+      selector:
+        boolean:

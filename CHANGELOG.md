@@ -10,7 +10,16 @@ its notes, so each release's section is what users read before updating.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **Silent / no-entry-delay arm and disarm services** (issue #8). Two new services expose the
+  `armSilent` and `noEntryDelay` flags the client already supported but Home Assistant's
+  standard `alarm_arm_*` / `alarm_disarm` services cannot carry:
+  - `cove_alula.arm`: `mode` (home, away, night) with optional `silent` and `no_entry_delay`.
+  - `cove_alula.disarm`: optional `silent` and `no_entry_delay`.
+
+  Both use the stored PIN and act on all panels, like the existing `force_arm` service. Both
+  flags default to `false`, so nothing changes for existing users and the entity and existing
+  services are untouched.
 
 ---
 
