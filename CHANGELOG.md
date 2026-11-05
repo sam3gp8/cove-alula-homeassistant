@@ -11,6 +11,20 @@ its notes, so each release's section is what users read before updating.
 ## [Unreleased]
 
 ### Added
+- **Configurable PIN handling** (issues #7 and #9). The config flow now asks how the
+  arm/disarm PIN should be handled, and the PIN field is optional:
+  - **Store a PIN** (default, unchanged): the PIN is saved and applied automatically, so
+    automations can arm/disarm unattended.
+  - **Ask for the PIN each time**: nothing is stored; Home Assistant prompts for the native
+    Cove/Alula PIN on each arm/disarm and sends it through, so each household member can use
+    their own PIN (#9).
+  - **Read-only**: no PIN is stored and arm/disarm are disabled; the panel entity still
+    reports state for automations, but exposes no arm buttons and refuses disarm (#7).
+
+  Existing entries are unaffected — a config entry with no stored mode is treated as
+  "Store a PIN", exactly as before. Changing the mode reloads the integration. The YAML
+  `arm`/`disarm`/`force_arm` (bypass) services require a stored PIN and are skipped with a
+  log warning in the other two modes; `force_arm` with `method: native` still works.
 - **Silent / no-entry-delay arm and disarm services** (issue #8). Two new services expose the
   `armSilent` and `noEntryDelay` flags the client already supported but Home Assistant's
   standard `alarm_arm_*` / `alarm_disarm` services cannot carry:

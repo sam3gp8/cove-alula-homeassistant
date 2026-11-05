@@ -18,6 +18,7 @@ from .const import (
     CONF_EMAIL,
     CONF_PASSWORD,
     CONF_PIN,
+    CONF_PIN_MODE,
     CONF_TOKEN,
     DOMAIN,
     POLL_INTERVAL_SECONDS,
@@ -86,6 +87,7 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
             entry.data.get(CONF_EMAIL),
             entry.data.get(CONF_PASSWORD),
             entry.data.get(CONF_PIN),
+            entry.data.get(CONF_PIN_MODE),
         )
 
     def config_changed(self, entry: ConfigEntry) -> bool:

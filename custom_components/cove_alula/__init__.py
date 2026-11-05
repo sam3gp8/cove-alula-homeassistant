@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
@@ -27,6 +29,8 @@ from .const import (
 )
 from .coordinator import CoveAlulaCoordinator
 from .covealula import LEVEL_AWAY, LEVEL_DISARM, LEVEL_NIGHT, LEVEL_STAY
+
+_LOGGER = logging.getLogger(__name__)
 
 # arm mode -> armingLevelValue. Sourced from the client constants so the away/night
 # assignment can never drift out of sync with the arm/read mapping there.
@@ -79,9 +83,17 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             if method == "native":
                 # panel's native forceArm (no PIN, attributed to user 0)
                 await coord.client.async_force_arm(device_id, level)
-            else:
+            elif pin:
                 # bypass any open zones, then arm with the stored PIN (most reliable)
                 await coord.client.async_arm_bypassing_open(device_id, level, pin)
+            else:
+                # prompt/read-only mode stores no PIN; the bypass method needs one. Use
+                # method: native to force-arm without a PIN.
+                _LOGGER.warning(
+                    "force_arm (method=bypass) skipped for %s: no PIN is stored. Use "
+                    "method: native, or configure a stored PIN.",
+                    device_id,
+                )
         await _for_each_panel(h)
         for coord in _coordinators(hass):
             await coord.async_request_refresh()
@@ -96,6 +108,13 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
         async def h(coord, device_id):
             pin = coord.entry.data.get(CONF_PIN)
+            if not pin:
+                _LOGGER.warning(
+                    "arm service skipped for %s: no PIN is stored (prompt/read-only mode). "
+                    "Arm from the panel entity, or configure a stored PIN.",
+                    device_id,
+                )
+                return
             await coord.client.async_set_arming_level(
                 device_id, level, pin, silent=silent, no_entry_delay=no_entry_delay
             )
@@ -109,6 +128,13 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
         async def h(coord, device_id):
             pin = coord.entry.data.get(CONF_PIN)
+            if not pin:
+                _LOGGER.warning(
+                    "disarm service skipped for %s: no PIN is stored (prompt/read-only "
+                    "mode). Disarm from the panel entity, or configure a stored PIN.",
+                    device_id,
+                )
+                return
             await coord.client.async_set_arming_level(
                 device_id, LEVEL_DISARM, pin, silent=silent, no_entry_delay=no_entry_delay
             )

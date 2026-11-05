@@ -6,7 +6,19 @@ PLATFORMS = ["alarm_control_panel", "binary_sensor"]
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 CONF_PIN = "pin"
+CONF_PIN_MODE = "pin_mode"
 CONF_TOKEN = "token"  # persisted CoveToken dict (so restarts don't re-login)
+
+# How the arm/disarm PIN is handled:
+#   stored   - a PIN is saved in the config entry and applied automatically (default;
+#              arm/disarm works unattended, e.g. from automations).
+#   prompt   - no PIN is stored; the native Cove/Alula PIN is typed into the Home Assistant
+#              dialog on each arm/disarm, so each household member can use their own PIN.
+#   readonly - no PIN is stored and arm/disarm are disabled; the panel is monitored only.
+PIN_MODE_STORED = "stored"
+PIN_MODE_PROMPT = "prompt"
+PIN_MODE_READONLY = "readonly"
+PIN_MODES = (PIN_MODE_STORED, PIN_MODE_PROMPT, PIN_MODE_READONLY)
 
 # Fallback REST poll interval; live updates arrive over the websocket.
 POLL_INTERVAL_SECONDS = 30
