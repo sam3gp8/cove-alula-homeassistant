@@ -8,14 +8,23 @@ from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
     AlarmControlPanelEntityFeature,
     AlarmControlPanelState,
+    CodeFormat,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_PIN, DOMAIN
+from .const import (
+    CONF_PIN,
+    CONF_PIN_MODE,
+    DOMAIN,
+    PIN_MODE_PROMPT,
+    PIN_MODE_READONLY,
+    PIN_MODE_STORED,
+)
 from .covealula import (
     LEVEL_AWAY,
     LEVEL_DISARM,
@@ -24,6 +33,12 @@ from .covealula import (
     PanelState,
 )
 from .coordinator import CoveAlulaCoordinator
+
+_ARM_FEATURES = (
+    AlarmControlPanelEntityFeature.ARM_HOME
+    | AlarmControlPanelEntityFeature.ARM_AWAY
+    | AlarmControlPanelEntityFeature.ARM_NIGHT
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,15 +61,6 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
 
     _attr_has_entity_name = True
     _attr_name = None  # use the device name
-    _attr_supported_features = (
-        AlarmControlPanelEntityFeature.ARM_HOME
-        | AlarmControlPanelEntityFeature.ARM_AWAY
-        | AlarmControlPanelEntityFeature.ARM_NIGHT
-    )
-    # PIN is stored in config and applied automatically, so automations can
-    # arm/disarm without entering a code in the UI.
-    _attr_code_arm_required = False
-    _attr_code_format = None
 
     def __init__(
         self,
@@ -64,8 +70,27 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
     ) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
-        self._pin = entry.data[CONF_PIN]
+        self._pin_mode = entry.data.get(CONF_PIN_MODE, PIN_MODE_STORED)
+        self._pin = (entry.data.get(CONF_PIN) or "") or None
         self._attr_unique_id = f"{entry.entry_id}_{device_id}"
+
+        if self._pin_mode == PIN_MODE_READONLY:
+            # Monitor only: expose panel state for automations, but no arm/disarm in the UI.
+            self._attr_supported_features = AlarmControlPanelEntityFeature(0)
+            self._attr_code_arm_required = False
+            self._attr_code_format = None
+        elif self._pin_mode == PIN_MODE_PROMPT:
+            # No stored PIN: Home Assistant prompts for the native Cove/Alula PIN on each
+            # arm/disarm and passes it through as the code.
+            self._attr_supported_features = _ARM_FEATURES
+            self._attr_code_arm_required = True
+            self._attr_code_format = CodeFormat.NUMBER
+        else:  # PIN_MODE_STORED
+            # Stored PIN is applied automatically, so automations can arm/disarm without
+            # entering a code in the UI.
+            self._attr_supported_features = _ARM_FEATURES
+            self._attr_code_arm_required = False
+            self._attr_code_format = None
 
     @property
     def _panel(self) -> PanelState | None:
@@ -130,20 +155,40 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
             "ac_failure": p.ac_failure,
         }
 
-    # ---- commands (PIN supplied from config) ----------------------------
+    # ---- commands -------------------------------------------------------
+
+    def _resolve_pin(self, code: str | None) -> str:
+        """Pick the PIN to send, honoring the configured PIN mode.
+
+        - readonly: arm/disarm are disabled entirely.
+        - prompt:   the code typed in the UI is the PIN (nothing is stored).
+        - stored:   the stored PIN is used; a UI code, if given, takes precedence.
+        """
+        if self._pin_mode == PIN_MODE_READONLY:
+            raise HomeAssistantError(
+                "Cove (Alula) is configured in read-only mode: no PIN is stored, so "
+                "arming and disarming from Home Assistant are disabled."
+            )
+        pin = code or self._pin
+        if not pin:
+            raise HomeAssistantError(
+                "No PIN available for this command. Enter your Cove/Alula PIN in the "
+                "dialog, or reconfigure the integration to store a PIN."
+            )
+        return pin
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
-        await self.coordinator.client.async_disarm(self._device_id, code or self._pin)
+        await self.coordinator.client.async_disarm(self._device_id, self._resolve_pin(code))
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
-        await self.coordinator.client.async_arm_stay(self._device_id, code or self._pin)
+        await self.coordinator.client.async_arm_stay(self._device_id, self._resolve_pin(code))
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
-        await self.coordinator.client.async_arm_away(self._device_id, code or self._pin)
+        await self.coordinator.client.async_arm_away(self._device_id, self._resolve_pin(code))
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_night(self, code: str | None = None) -> None:
-        await self.coordinator.client.async_arm_night(self._device_id, code or self._pin)
+        await self.coordinator.client.async_arm_night(self._device_id, self._resolve_pin(code))
         await self.coordinator.async_request_refresh()
