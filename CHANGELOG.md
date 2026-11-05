@@ -10,6 +10,12 @@ its notes, so each release's section is what users read before updating.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+---
+
+## [1.1.0] - 2026-11-05
+
 ### Added
 - **Configurable PIN handling** (issues #7 and #9). The config flow now asks how the
   arm/disarm PIN should be handled, and the PIN field is optional:
