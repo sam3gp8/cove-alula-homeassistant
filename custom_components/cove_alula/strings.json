@@ -24,6 +24,28 @@
       "already_configured": "This account is already configured."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Cove (Alula) options",
+        "description": "Change how arm/disarm is handled and tune how often Home Assistant polls the cloud. Changes apply immediately (the integration reloads).",
+        "data": {
+          "pin_mode": "PIN handling",
+          "pin": "Arm/disarm PIN (stored mode only)",
+          "poll_interval": "Poll interval",
+          "availability_grace": "Availability grace period"
+        },
+        "data_description": {
+          "pin": "Only used when PIN handling is \"Store a PIN\". Leave blank for the other modes.",
+          "poll_interval": "How often to poll the cloud as a backstop. Live updates still arrive instantly over the websocket; lower only if you need faster recovery after a missed push.",
+          "availability_grace": "How long to keep the last known state through a brief connection lapse before reporting entities unavailable. Higher avoids flapping; lower surfaces real outages sooner."
+        }
+      }
+    },
+    "error": {
+      "pin_required": "A PIN is required when PIN handling is set to \"Store a PIN\"."
+    }
+  },
   "selector": {
     "pin_mode": {
       "options": {

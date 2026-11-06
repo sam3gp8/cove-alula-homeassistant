@@ -15,13 +15,16 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     AVAILABILITY_GRACE_SECONDS,
+    CONF_AVAILABILITY_GRACE,
     CONF_EMAIL,
     CONF_PASSWORD,
     CONF_PIN,
     CONF_PIN_MODE,
+    CONF_POLL_INTERVAL,
     CONF_TOKEN,
     DOMAIN,
     POLL_INTERVAL_SECONDS,
+    get_setting,
 )
 from .covealula import (
     CoveAlulaAuthError,
@@ -42,7 +45,9 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=POLL_INTERVAL_SECONDS),
+            update_interval=timedelta(
+                seconds=int(get_setting(entry, CONF_POLL_INTERVAL, POLL_INTERVAL_SECONDS))
+            ),
         )
         self.entry = entry
         session = async_get_clientsession(hass)
@@ -81,19 +86,23 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
 
     @staticmethod
     def _config_signature(entry: ConfigEntry) -> tuple:
-        """The parts of the entry whose change should trigger a reload -- credentials and
-        PIN. Deliberately excludes CONF_TOKEN, which changes on every refresh."""
+        """The parts of the entry whose change should trigger a reload -- credentials, and
+        the resolved user settings (PIN handling, PIN, poll interval, availability grace),
+        which may be edited in entry.options by the options flow. Deliberately excludes
+        CONF_TOKEN, which changes on every refresh."""
         return (
             entry.data.get(CONF_EMAIL),
             entry.data.get(CONF_PASSWORD),
-            entry.data.get(CONF_PIN),
-            entry.data.get(CONF_PIN_MODE),
+            get_setting(entry, CONF_PIN),
+            get_setting(entry, CONF_PIN_MODE),
+            get_setting(entry, CONF_POLL_INTERVAL),
+            get_setting(entry, CONF_AVAILABILITY_GRACE),
         )
 
     def config_changed(self, entry: ConfigEntry) -> bool:
-        """True only if a reload-worthy field (email/password/PIN) changed since the last
-        reload. Returns False for token-only writes, so the update listener can skip the
-        reload that would otherwise flap every entity to 'unavailable'."""
+        """True only if a reload-worthy field (credentials or a user setting) changed since
+        the last reload. Returns False for token-only writes, so the update listener can
+        skip the reload that would otherwise flap every entity to 'unavailable'."""
         sig = self._config_signature(entry)
         if sig == self._reload_signature:
             return False
@@ -122,7 +131,10 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
         ts = self._last_healthy.get(device_id, 0.0)
         if not ts:
             return False  # never had a healthy view yet -> unavailable until first data
-        return (time.monotonic() - ts) < AVAILABILITY_GRACE_SECONDS
+        grace = int(
+            get_setting(self.entry, CONF_AVAILABILITY_GRACE, AVAILABILITY_GRACE_SECONDS)
+        )
+        return (time.monotonic() - ts) < grace
 
     async def async_setup(self) -> None:
         """Authenticate, discover panels, open the socket, and subscribe.

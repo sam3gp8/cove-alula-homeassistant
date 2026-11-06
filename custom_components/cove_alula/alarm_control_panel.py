@@ -24,6 +24,7 @@ from .const import (
     PIN_MODE_PROMPT,
     PIN_MODE_READONLY,
     PIN_MODE_STORED,
+    get_setting,
 )
 from .covealula import (
     LEVEL_AWAY,
@@ -70,8 +71,8 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
     ) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
-        self._pin_mode = entry.data.get(CONF_PIN_MODE, PIN_MODE_STORED)
-        self._pin = (entry.data.get(CONF_PIN) or "") or None
+        self._pin_mode = get_setting(entry, CONF_PIN_MODE, PIN_MODE_STORED)
+        self._pin = (get_setting(entry, CONF_PIN, "") or "") or None
         self._attr_unique_id = f"{entry.entry_id}_{device_id}"
 
         if self._pin_mode == PIN_MODE_READONLY:

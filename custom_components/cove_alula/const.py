@@ -1,5 +1,9 @@
 """Constants for the Cove (Alula) Alarm integration."""
 
+from __future__ import annotations
+
+from typing import Any
+
 DOMAIN = "cove_alula"
 PLATFORMS = ["alarm_control_panel", "binary_sensor"]
 
@@ -7,6 +11,8 @@ CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 CONF_PIN = "pin"
 CONF_PIN_MODE = "pin_mode"
+CONF_POLL_INTERVAL = "poll_interval"
+CONF_AVAILABILITY_GRACE = "availability_grace"
 CONF_TOKEN = "token"  # persisted CoveToken dict (so restarts don't re-login)
 
 # How the arm/disarm PIN is handled:
@@ -20,8 +26,11 @@ PIN_MODE_PROMPT = "prompt"
 PIN_MODE_READONLY = "readonly"
 PIN_MODES = (PIN_MODE_STORED, PIN_MODE_PROMPT, PIN_MODE_READONLY)
 
-# Fallback REST poll interval; live updates arrive over the websocket.
+# Fallback REST poll interval; live updates arrive over the websocket. Used as the default
+# for the configurable CONF_POLL_INTERVAL option.
 POLL_INTERVAL_SECONDS = 30
+POLL_INTERVAL_MIN = 10
+POLL_INTERVAL_MAX = 600
 
 # Grace period before an entity is reported unavailable after contact is lost.
 # Cove/Alula has no always-on connection guarantee, and we intentionally recycle the
@@ -30,7 +39,26 @@ POLL_INTERVAL_SECONDS = 30
 # (observed: 2-second Unavailable blips every few minutes). We keep the last known state
 # and only surface "unavailable" once contact has been lost for longer than this. Sits in
 # the 30-60s range: comfortably rides one missed 30s poll, trips on a sustained outage.
+# Used as the default for the configurable CONF_AVAILABILITY_GRACE option.
 AVAILABILITY_GRACE_SECONDS = 45
+AVAILABILITY_GRACE_MIN = 10
+AVAILABILITY_GRACE_MAX = 600
+
+
+def get_setting(entry: Any, key: str, default: Any = None) -> Any:
+    """Resolve a user setting, preferring entry.options (editable after setup via the
+    integration's Configure screen) over entry.data (set at initial setup), then `default`.
+
+    Credentials and the persisted token live only in entry.data; the tunable settings
+    (PIN handling, stored PIN, poll interval, availability grace) may be overridden in
+    entry.options by the options flow. Existing entries have empty options and so keep
+    their original entry.data / default behavior.
+    """
+    options = getattr(entry, "options", None) or {}
+    if key in options:
+        return options[key]
+    return entry.data.get(key, default)
+
 
 # Services
 SERVICE_CANCEL_ALARM = "cancel_alarm"

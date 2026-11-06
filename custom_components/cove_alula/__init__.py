@@ -26,6 +26,7 @@ from .const import (
     SERVICE_CONFIRM_ALARM,
     SERVICE_DISARM,
     SERVICE_FORCE_ARM,
+    get_setting,
 )
 from .coordinator import CoveAlulaCoordinator
 from .covealula import LEVEL_AWAY, LEVEL_DISARM, LEVEL_NIGHT, LEVEL_STAY
@@ -79,7 +80,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             return
 
         async def h(coord, device_id):
-            pin = coord.entry.data.get(CONF_PIN)
+            pin = get_setting(coord.entry, CONF_PIN, "")
             if method == "native":
                 # panel's native forceArm (no PIN, attributed to user 0)
                 await coord.client.async_force_arm(device_id, level)
@@ -107,7 +108,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         no_entry_delay = bool(call.data.get(ATTR_NO_ENTRY_DELAY, False))
 
         async def h(coord, device_id):
-            pin = coord.entry.data.get(CONF_PIN)
+            pin = get_setting(coord.entry, CONF_PIN, "")
             if not pin:
                 _LOGGER.warning(
                     "arm service skipped for %s: no PIN is stored (prompt/read-only mode). "
@@ -127,7 +128,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         no_entry_delay = bool(call.data.get(ATTR_NO_ENTRY_DELAY, False))
 
         async def h(coord, device_id):
-            pin = coord.entry.data.get(CONF_PIN)
+            pin = get_setting(coord.entry, CONF_PIN, "")
             if not pin:
                 _LOGGER.warning(
                     "disarm service skipped for %s: no PIN is stored (prompt/read-only "
