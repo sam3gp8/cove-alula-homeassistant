@@ -178,18 +178,34 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
             )
         return pin
 
+    def _modifiers(self) -> dict[str, bool]:
+        """The arm/disarm flags from the Silent / No-entry-delay switches, so arming or
+        disarming from the UI honors them without needing the YAML services."""
+        return {
+            "silent": self.coordinator.arm_silent.get(self._device_id, False),
+            "no_entry_delay": self.coordinator.arm_no_entry_delay.get(self._device_id, False),
+        }
+
     async def async_alarm_disarm(self, code: str | None = None) -> None:
-        await self.coordinator.client.async_disarm(self._device_id, self._resolve_pin(code))
+        await self.coordinator.client.async_disarm(
+            self._device_id, self._resolve_pin(code), **self._modifiers()
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
-        await self.coordinator.client.async_arm_stay(self._device_id, self._resolve_pin(code))
+        await self.coordinator.client.async_arm_stay(
+            self._device_id, self._resolve_pin(code), **self._modifiers()
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
-        await self.coordinator.client.async_arm_away(self._device_id, self._resolve_pin(code))
+        await self.coordinator.client.async_arm_away(
+            self._device_id, self._resolve_pin(code), **self._modifiers()
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_night(self, code: str | None = None) -> None:
-        await self.coordinator.client.async_arm_night(self._device_id, self._resolve_pin(code))
+        await self.coordinator.client.async_arm_night(
+            self._device_id, self._resolve_pin(code), **self._modifiers()
+        )
         await self.coordinator.async_request_refresh()

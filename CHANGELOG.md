@@ -14,6 +14,24 @@ _Nothing yet._
 
 ---
 
+## [1.3.0] - 2026-11-06
+
+### Added
+- **Silent arming/disarming from the UI.** The `armSilent` and `noEntryDelay` flags were only
+  reachable through the `cove_alula.arm` / `cove_alula.disarm` services, so arming or disarming
+  from the panel's dashboard tile was always audible. Home Assistant's alarm dialog has no room
+  for extra options, so each panel now exposes two config switches:
+  - **Silent arming** (`switch…_arm_silent`) — when on, arming and disarming from the UI (and
+    the standard `alarm_control_panel` services) are sent silently.
+  - **No entry delay** (`switch…_arm_no_entry_delay`) — when on, arming skips the entry delay.
+
+  Turn the switch on, then arm/disarm as usual. The state is remembered across restarts, so it
+  stays in effect until you turn it back off, and the existing `cove_alula.arm` / `disarm`
+  services (with per-call `silent` / `no_entry_delay`) are unchanged. The switches aren't
+  created in read-only mode, which has no arm/disarm.
+
+---
+
 ## [1.2.0] - 2026-11-06
 
 ### Added
