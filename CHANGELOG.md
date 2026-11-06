@@ -14,6 +14,26 @@ _Nothing yet._
 
 ---
 
+## [1.2.0] - 2026-11-06
+
+### Added
+- **Options flow — reconfigure after setup from the integration's "Configure" screen**,
+  without removing and re-adding the integration. Exposes every setting that makes sense to
+  change at runtime:
+  - **PIN handling** — switch between *Store a PIN*, *Ask for the PIN each time* (PIN pad),
+    and *Read-only*, the same three modes offered at setup (1.1.0).
+  - **Arm/disarm PIN** — change the stored PIN (used in *Store a PIN* mode).
+  - **Poll interval** — how often the cloud is polled as a backstop to the live websocket
+    (default 30s; 10–600s).
+  - **Availability grace period** — how long the last known state is kept through a brief
+    connection lapse before entities report unavailable (default 45s; 10–600s).
+
+  Settings live in the config entry's options and fall back to the original setup values and
+  built-in defaults, so existing installs are unaffected until changed. Saving reloads the
+  integration so changes take effect immediately, and the PIN is redacted from diagnostics.
+
+---
+
 ## [1.1.0] - 2026-11-05
 
 ### Added
