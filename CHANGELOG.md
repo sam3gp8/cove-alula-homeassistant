@@ -26,6 +26,10 @@ _Nothing yet._
   standard `alarm_control_panel` services) go out silently / with no entry delay — no extra
   entity needed, and it keeps working even if the switches aren't in use.
 
+- **Dashboard card example** (`examples/arming-panel-card.yaml`, and a "Dashboard card" section
+  in the README) that stacks the alarm panel with the Silent arming / No entry delay switches,
+  so the toggles sit next to the arm buttons.
+
 ### Changed
 - The **Silent arming** / **No entry delay** switches are now a live, in-session override:
   they start from the option above and reset to it on restart (instead of persisting their own

@@ -163,6 +163,12 @@ keeps working across restarts without re-authenticating.
 
 * An **Alarm Control Panel** entity supporting **Arm Home**, **Arm Away**, **Arm Night**,
   and **Disarm**. The device is named after your system (e.g. "My Home").
+* **Silent arming** and **No entry delay** switches on the panel device. When on, arming and
+  disarming from the panel (its own buttons, and the standard `alarm_control_panel` services)
+  are sent silently / with no entry delay. These are a live override of the matching **Arm and
+  disarm silently** / **Skip the entry delay** options on the integration's *Configure* screen,
+  which set the persistent default. See [Dashboard card](#dashboard-card) to put the toggles
+  right next to the arm buttons.
 * A **binary_sensor per zone** (door / window / motion / smoke / etc., auto-classified
   from the panel's zone type), named from the panel ("Kitchen Door") and showing
   open/closed live. Each carries `bypassed`, `alarm`, `tamper`, `low_battery`, and
@@ -184,6 +190,42 @@ keeps working across restarts without re-authenticating.
 
 State derives from live panel pushes: `disarmed`, `armed_home`, `armed_away`,
 `armed_night`, `arming` (exit delay), `pending` (entry delay), `triggered` (in alarm).
+
+---
+
+## Dashboard card
+
+Home Assistant's alarm dialog can't hold extra controls, and an integration can't insert a
+card into your own dashboard — so to get the **Silent arming** / **No entry delay** toggles
+right next to the arm buttons, add this card. It stacks the alarm panel with the two switches
+as one card. In your dashboard: **Edit → Add Card → Manual** and paste:
+
+```yaml
+type: vertical-stack
+cards:
+  - type: alarm-panel
+    entity: alarm_control_panel.home_cove_alarm
+    states:
+      - arm_home
+      - arm_away
+      - arm_night
+  - type: entities
+    title: Arming options
+    entities:
+      - entity: switch.cove_alarm_silent_arming
+        name: Silent arming
+      - entity: switch.cove_alarm_no_entry_delay
+        name: No entry delay
+```
+
+Check the entity IDs against **Developer Tools → States** (filter `cove`) and swap in yours if
+they differ. A ready-to-copy copy lives in [`examples/arming-panel-card.yaml`](examples/arming-panel-card.yaml).
+
+Prefer no YAML? Home Assistant's **default (auto-generated) dashboard** already groups the
+alarm and both switches together on the Cove device's card, with nothing to configure — the
+manual card above is only for a custom dashboard. If you only want the panel to *always* arm
+silently, you don't need the card at all: just enable **Arm and disarm silently** under the
+integration's *Configure* screen.
 
 ---
 
