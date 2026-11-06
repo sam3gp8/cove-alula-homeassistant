@@ -64,6 +64,13 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
         # derived from this with a grace period, so brief socket recycles don't flap.
         self._last_healthy: dict[str, float] = {}
 
+        # Per-panel arming modifiers surfaced as switches (Silent / No entry delay). The
+        # alarm entity reads these when arming/disarming from the UI or the standard
+        # services, so a user can arm/disarm silently without the YAML services. Owned by
+        # the switch entities, which restore their value on startup.
+        self.arm_silent: dict[str, bool] = {}
+        self.arm_no_entry_delay: dict[str, bool] = {}
+
         token = None
         if entry.data.get(CONF_TOKEN):
             token = CoveToken.from_dict(entry.data[CONF_TOKEN])

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 DOMAIN = "cove_alula"
-PLATFORMS = ["alarm_control_panel", "binary_sensor"]
+PLATFORMS = ["alarm_control_panel", "binary_sensor", "switch"]
 
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
