@@ -15,6 +15,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     AVAILABILITY_GRACE_SECONDS,
+    CONF_ARM_NO_ENTRY_DELAY,
+    CONF_ARM_SILENT,
     CONF_AVAILABILITY_GRACE,
     CONF_EMAIL,
     CONF_PASSWORD,
@@ -104,6 +106,8 @@ class CoveAlulaCoordinator(DataUpdateCoordinator[dict[str, PanelState]]):
             get_setting(entry, CONF_PIN_MODE),
             get_setting(entry, CONF_POLL_INTERVAL),
             get_setting(entry, CONF_AVAILABILITY_GRACE),
+            get_setting(entry, CONF_ARM_SILENT),
+            get_setting(entry, CONF_ARM_NO_ENTRY_DELAY),
         )
 
     def config_changed(self, entry: ConfigEntry) -> bool:

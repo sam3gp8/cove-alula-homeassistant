@@ -14,6 +14,26 @@ _Nothing yet._
 
 ---
 
+## [1.4.0] - 2026-11-06
+
+### Added
+- **"Arm and disarm silently" as a panel setting.** The silent / no-entry-delay flags were
+  only reachable via the 1.3.0 switches (buried config entities on the device) or the YAML
+  services, and Home Assistant's alarm dialog can't host an extra toggle — so there was no
+  obvious way to make the panel's own Home/Away/Night/Disarm buttons silent. There are now two
+  options in the integration's **Configure** screen (next to PIN handling): **Arm and disarm
+  silently** and **Skip the entry delay**. Enable one and the panel's own arm/disarm (and the
+  standard `alarm_control_panel` services) go out silently / with no entry delay — no extra
+  entity needed, and it keeps working even if the switches aren't in use.
+
+### Changed
+- The **Silent arming** / **No entry delay** switches are now a live, in-session override:
+  they start from the option above and reset to it on restart (instead of persisting their own
+  state), so the option is the single source of the default. They're also no longer tucked in
+  the device's "Configuration" section — they appear as normal controls.
+
+---
+
 ## [1.3.0] - 2026-11-06
 
 ### Added

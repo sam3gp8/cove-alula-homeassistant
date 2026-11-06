@@ -13,6 +13,12 @@ CONF_PIN = "pin"
 CONF_PIN_MODE = "pin_mode"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_AVAILABILITY_GRACE = "availability_grace"
+# Persistent arm/disarm modifiers (options). When set, the alarm panel's own arm/disarm
+# (the Home/Away/Night/Disarm buttons) go out silently / with no entry delay -- the live
+# switches override these per-session. The key strings match the coordinator attributes and
+# the switch unique-id suffixes so option, switch, and runtime value stay in lockstep.
+CONF_ARM_SILENT = "arm_silent"
+CONF_ARM_NO_ENTRY_DELAY = "arm_no_entry_delay"
 CONF_TOKEN = "token"  # persisted CoveToken dict (so restarts don't re-login)
 
 # How the arm/disarm PIN is handled:
