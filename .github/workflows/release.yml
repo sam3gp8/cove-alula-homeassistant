@@ -1,0 +1,60 @@
+name: Release
+
+# Publish a GitHub release whenever the integration version in manifest.json is bumped and
+# merged to main. HACS serves the latest GitHub release to users, so this turns a merged
+# version bump into a release automatically — no manual tagging. Runs on every push to main
+# but only publishes when the manifest version has no release yet, so merges that don't bump
+# the version are a no-op.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish release on version bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read integration version
+        id: ver
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('custom_components/cove_alula/manifest.json'))['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Manifest version: $version"
+
+      - name: Check whether this version is already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.ver.outputs.version }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ steps.ver.outputs.version }} already exists; nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No release for ${{ steps.ver.outputs.version }} yet; will publish."
+          fi
+
+      - name: Extract release notes from CHANGELOG
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          python3 .github/scripts/extract_changelog.py "${{ steps.ver.outputs.version }}" > release_notes.md
+          echo "----- release notes -----"
+          cat release_notes.md
+
+      - name: Create GitHub release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.version }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "v${{ steps.ver.outputs.version }}" \
+            --notes-file release_notes.md
