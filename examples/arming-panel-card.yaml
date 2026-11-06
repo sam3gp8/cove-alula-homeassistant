@@ -1,0 +1,26 @@
+# Cove (Alula) Alarm — dashboard card
+#
+# Stacks the alarm panel with the Silent arming / No entry delay switches so the toggles sit
+# right next to the arm buttons. Add it to a dashboard with: Edit -> Add Card -> Manual, then
+# paste the block below.
+#
+# Check the entity IDs against Developer Tools -> States (filter "cove") and change them to
+# match yours if they differ. Turn "Silent arming" on, then tap an arm button, and arming is
+# sent silently. (To make the panel ALWAYS silent instead, enable "Arm and disarm silently"
+# on the integration's Configure screen — no card needed.)
+
+type: vertical-stack
+cards:
+  - type: alarm-panel
+    entity: alarm_control_panel.home_cove_alarm
+    states:
+      - arm_home
+      - arm_away
+      - arm_night
+  - type: entities
+    title: Arming options
+    entities:
+      - entity: switch.cove_alarm_silent_arming
+        name: Silent arming
+      - entity: switch.cove_alarm_no_entry_delay
+        name: No entry delay

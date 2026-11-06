@@ -18,6 +18,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CONF_ARM_NO_ENTRY_DELAY,
+    CONF_ARM_SILENT,
     CONF_PIN,
     CONF_PIN_MODE,
     DOMAIN,
@@ -73,6 +75,10 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
         self._device_id = device_id
         self._pin_mode = get_setting(entry, CONF_PIN_MODE, PIN_MODE_STORED)
         self._pin = (get_setting(entry, CONF_PIN, "") or "") or None
+        # Persistent "always silent / no entry delay" defaults from options; the live
+        # switches (if present) override these at arm/disarm time.
+        self._default_silent = bool(get_setting(entry, CONF_ARM_SILENT, False))
+        self._default_no_entry_delay = bool(get_setting(entry, CONF_ARM_NO_ENTRY_DELAY, False))
         self._attr_unique_id = f"{entry.entry_id}_{device_id}"
 
         if self._pin_mode == PIN_MODE_READONLY:
@@ -179,11 +185,23 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
         return pin
 
     def _modifiers(self) -> dict[str, bool]:
-        """The arm/disarm flags from the Silent / No-entry-delay switches, so arming or
-        disarming from the UI honors them without needing the YAML services."""
+        """The arm/disarm flags applied to arming/disarming from this panel (its own
+        Home/Away/Night/Disarm buttons and the standard alarm services), so they honor the
+        silent / no-entry-delay preference without the YAML services.
+
+        Precedence: the live Silent/No-entry-delay switch (if the user has one) wins;
+        otherwise the persistent option default is used. So the option alone is enough to
+        make this panel silent, even if the switch entities aren't in use.
+        """
         return {
-            "silent": self.coordinator.arm_silent.get(self._device_id, False),
-            "no_entry_delay": self.coordinator.arm_no_entry_delay.get(self._device_id, False),
+            "silent": bool(
+                self.coordinator.arm_silent.get(self._device_id, self._default_silent)
+            ),
+            "no_entry_delay": bool(
+                self.coordinator.arm_no_entry_delay.get(
+                    self._device_id, self._default_no_entry_delay
+                )
+            ),
         }
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:

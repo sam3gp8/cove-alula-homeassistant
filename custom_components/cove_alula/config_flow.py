@@ -15,6 +15,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -27,6 +28,8 @@ from .const import (
     AVAILABILITY_GRACE_MAX,
     AVAILABILITY_GRACE_MIN,
     AVAILABILITY_GRACE_SECONDS,
+    CONF_ARM_NO_ENTRY_DELAY,
+    CONF_ARM_SILENT,
     CONF_AVAILABILITY_GRACE,
     CONF_EMAIL,
     CONF_PASSWORD,
@@ -164,6 +167,10 @@ class CoveAlulaOptionsFlow(OptionsFlow):
                         CONF_PIN: pin if pin_mode == PIN_MODE_STORED else "",
                         CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL]),
                         CONF_AVAILABILITY_GRACE: int(user_input[CONF_AVAILABILITY_GRACE]),
+                        CONF_ARM_SILENT: bool(user_input.get(CONF_ARM_SILENT, False)),
+                        CONF_ARM_NO_ENTRY_DELAY: bool(
+                            user_input.get(CONF_ARM_NO_ENTRY_DELAY, False)
+                        ),
                     },
                 )
 
@@ -191,6 +198,14 @@ class CoveAlulaOptionsFlow(OptionsFlow):
                         )
                     ),
                 ): _seconds_selector(AVAILABILITY_GRACE_MIN, AVAILABILITY_GRACE_MAX),
+                vol.Optional(
+                    CONF_ARM_SILENT,
+                    default=bool(get_setting(entry, CONF_ARM_SILENT, False)),
+                ): BooleanSelector(),
+                vol.Optional(
+                    CONF_ARM_NO_ENTRY_DELAY,
+                    default=bool(get_setting(entry, CONF_ARM_NO_ENTRY_DELAY, False)),
+                ): BooleanSelector(),
             }
         )
         return self.async_show_form(
