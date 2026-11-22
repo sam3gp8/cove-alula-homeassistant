@@ -8,6 +8,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). T
 kept in sync with the headings below — HACS installs the latest GitHub release and shows
 its notes, so each release's section is what users read before updating.
 
+## [1.4.1] - 2026-11-21 (Preet-408 fork)
+### Fixed
+- Read-only mode now blocks every panel command. The `force_arm` (native), `cancel_alarm`, `confirm_alarm` and `bypass_zone` services previously still ran without a PIN in read-only mode; all six services now refuse before anything is sent.
+- Zone sensor types follow the Cove app's own `ui_type` values: Low Temp → cold, High Temp → heat, Glassbreak → sound (Detected/Clear), Tilt → garage door, Panic/Medical → safety, Gate/Safe → opening. Freeze sensors named after a location (for example "Water Heater") no longer show up as leak sensors.
+
 ## [Unreleased]
 
 _Nothing yet._

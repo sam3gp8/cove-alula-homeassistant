@@ -23,6 +23,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .covealula import PanelState, Zone
+from .zone_class import exact_class, name_is_cold
 from .coordinator import CoveAlulaCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,6 +35,11 @@ _LOGGER = logging.getLogger(__name__)
 def _zone_device_class(zone: Zone) -> BinarySensorDeviceClass:
     ui = (zone.ui_type or "").strip().lower()
     name = (zone.name or "").lower()
+
+    # 0) exact Cove ui_type (the types the Cove app itself uses)
+    exact = exact_class(zone.ui_type)
+    if exact:
+        return BinarySensorDeviceClass(exact)
 
     # 1) exact-ish uiType classification
     if ui:
@@ -55,7 +61,9 @@ def _zone_device_class(zone: Zone) -> BinarySensorDeviceClass:
                 return BinarySensorDeviceClass.WINDOW
             return BinarySensorDeviceClass.DOOR
 
-    # 2) fall back to the zone name
+    # 2) fall back to the zone name (freeze before water: "Water Heater" may be a freeze sensor)
+    if name_is_cold(zone.name):
+        return BinarySensorDeviceClass.COLD
     if any(k in name for k in ("motion", "pir")):
         return BinarySensorDeviceClass.MOTION
     if "glass" in name or "window" in name:
