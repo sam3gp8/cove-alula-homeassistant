@@ -8,6 +8,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
@@ -27,6 +28,9 @@ from .const import (
     SERVICE_DISARM,
     SERVICE_FORCE_ARM,
     get_setting,
+    CONF_PIN_MODE,
+    PIN_MODE_READONLY,
+    PIN_MODE_STORED,
 )
 from .coordinator import CoveAlulaCoordinator
 from .covealula import LEVEL_AWAY, LEVEL_DISARM, LEVEL_NIGHT, LEVEL_STAY
@@ -46,8 +50,18 @@ async def _async_register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_CANCEL_ALARM):
         return
 
+    def _ensure_writable(coord) -> None:
+        """Read-only mode means no commands to the panel at all, not just no arm/disarm."""
+        if get_setting(coord.entry, CONF_PIN_MODE, PIN_MODE_STORED) == PIN_MODE_READONLY:
+            raise HomeAssistantError(
+                "Cove (Alula) is configured read-only; panel commands are disabled."
+            )
+
     async def _for_each_panel(handler) -> None:
-        for coord in _coordinators(hass):
+        coords = _coordinators(hass)
+        for coord in coords:  # refuse before sending anything to any panel
+            _ensure_writable(coord)
+        for coord in coords:
             for device_id in (coord.data or {}):
                 await handler(coord, device_id)
 
