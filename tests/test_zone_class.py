@@ -14,7 +14,7 @@ def test_every_cove_app_type_maps():
     expected = {
         "Door": "door", "Window": "window", "Glassbreak": "sound", "Fire": "smoke",
         "Tilt": "garage_door", "Motion": "motion", "Panic": "safety", "High Temp": "heat",
-        "Low Temp": "cold", "Water": "moisture", "CO": "co", "Medical": "safety",
+        "Low Temp": "cold", "Water": "moisture", "CO": "carbon_monoxide", "Medical": "safety",
         "Tamper": "tamper", "Gate": "opening", "Safe": "opening",
     }
     for ui, cls in expected.items():
@@ -38,6 +38,11 @@ def test_freeze_name_fallback():
 
 
 def test_device_classes_are_real_ha_values():
-    valid = {"door", "window", "sound", "smoke", "garage_door", "motion", "safety", "heat",
-             "cold", "moisture", "co", "tamper", "opening"}
-    assert set(zc._EXACT.values()) <= valid
+    # Every value of homeassistant.components.binary_sensor.BinarySensorDeviceClass (2026.11).
+    ha_values = {
+        "battery", "battery_charging", "carbon_monoxide", "cold", "connectivity", "door",
+        "garage_door", "gas", "heat", "light", "lock", "moisture", "motion", "moving",
+        "occupancy", "opening", "plug", "power", "presence", "problem", "running", "safety",
+        "smoke", "sound", "tamper", "update", "vibration", "window",
+    }
+    assert set(zc._EXACT.values()) <= ha_values

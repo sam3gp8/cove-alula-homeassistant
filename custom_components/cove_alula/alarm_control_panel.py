@@ -171,7 +171,10 @@ class CoveAlulaAlarmPanel(CoordinatorEntity[CoveAlulaCoordinator], AlarmControlP
         - prompt:   the code typed in the UI is the PIN (nothing is stored).
         - stored:   the stored PIN is used; a UI code, if given, takes precedence.
         """
-        if self._pin_mode == PIN_MODE_READONLY:
+        # Re-read the mode at command time: an options change to read-only must take
+        # effect immediately, not only after the entry reloads.
+        live_mode = get_setting(self.coordinator.entry, CONF_PIN_MODE, PIN_MODE_STORED)
+        if self._pin_mode == PIN_MODE_READONLY or live_mode == PIN_MODE_READONLY:
             raise HomeAssistantError(
                 "Cove (Alula) is configured in read-only mode: no PIN is stored, so "
                 "arming and disarming from Home Assistant are disabled."

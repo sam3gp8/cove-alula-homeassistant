@@ -26,7 +26,7 @@ _EXACT: dict[str, str] = {
     "freeze": "cold",
     "water": "moisture",
     "flood": "moisture",
-    "co": "co",
+    "co": "carbon_monoxide",
     "tamper": "tamper",
     "gate": "opening",
     "safe": "opening",
